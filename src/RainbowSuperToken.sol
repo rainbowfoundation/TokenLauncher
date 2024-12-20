@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.25;
+pragma solidity ^0.8.0;
 
 // Contracts
 import { Owned } from "lib/solmate/src/auth/Owned.sol";
@@ -65,7 +65,7 @@ contract RainbowSuperToken is ERC20, Owned {
     uint256 totalMintedSupply;
 
     /// @dev Tracks if a user has claimed their tokens
-    mapping(address user => bool claimedAlready) public claimed;
+    mapping(address => bool) public claimed;
 
     /// @dev Error emitted when the proof supplied is invalid
     error InvalidProof();
