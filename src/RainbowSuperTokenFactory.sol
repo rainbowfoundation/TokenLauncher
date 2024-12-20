@@ -1,42 +1,130 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.25;
 
-import {Owned} from "lib/solmate/src/auth/Owned.sol";
-import {ERC721TokenReceiver} from "solmate/tokens/ERC721.sol";
+import { Owned } from "lib/solmate/src/auth/Owned.sol";
+import { ERC721TokenReceiver } from "solmate/tokens/ERC721.sol";
+import { ERC20 } from "lib/solmate/src/tokens/ERC20.sol";
 
-import {RainbowSuperToken} from "src/RainbowSuperToken.sol";
+import { RainbowSuperToken } from "src/RainbowSuperToken.sol";
 
-import {IUniswapV3Pool} from "lib/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
-import {IUniswapV3Factory} from "lib/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
-import {INonfungiblePositionManager} from "v3-periphery/interfaces/INonfungiblePositionManager.sol";
+import { TickMath } from "lib/v3-core/contracts/libraries/TickMath.sol";
+import { FixedPointMathLib } from "lib/solmate/src/utils/FixedPointMathLib.sol";
 
+import { IUniswapV3Pool } from "lib/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
+import { IUniswapV3Factory } from "lib/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
+import { INonfungiblePositionManager } from "v3-periphery/interfaces/INonfungiblePositionManager.sol";
+
+/// @title RainbowSuperTokenFactory
+/// @author CopyPaste - for Rainbow with love <3
+/// @notice A factory contract for creating RainbowSuperTokens and managing their liquidity positions.
 contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
+    using FixedPointMathLib for uint256;
+
+    /*//////////////////////////////////////////////////////////////
+                                 ERRORS
+    //////////////////////////////////////////////////////////////*/
+
+    error ReservedName();
+    error ReservedTicker();
+    error BannedName();
+    error BannedTicker();
+    error NotUniswapPositionManager();
+    error InvalidFeeSplit();
+    error InvalidSupplyAllocation();
+    error NoFeesToClaim();
+    error Unauthorized();
+    error InvalidToken();
+
     /*//////////////////////////////////////////////////////////////
                                  EVENTS
     //////////////////////////////////////////////////////////////*/
+
     event RainbowSuperTokenCreated(address indexed token, address indexed owner);
+    event FeeConfigUpdated(address indexed token, FeeConfig config);
+    event FeesCollected(uint256 indexed tokenId, uint256 creatorFee0, uint256 creatorFee1, uint256 protocolFee0, uint256 protocolFee1);
+    event FeesClaimed(address indexed recipient, uint256 indexed tokenId, uint256 amount0, uint256 amount1);
+
+    /*//////////////////////////////////////////////////////////////
+                              FEE CONFIG
+    //////////////////////////////////////////////////////////////*/
+
+    struct FeeConfig {
+        // Creator's share of LP fees (in basis points, max 10000)
+        uint16 creatorLPFeeBps;
+        // Protocol's base fee from initial supply (in basis points)
+        uint16 protocolBaseBps;
+        // Creator's fee from initial supply (in basis points)
+        uint16 creatorBaseBps;
+        // Airdrop allocation from initial supply (in basis points)
+        uint16 airdropBps;
+        // Whether this token has airdrop enabled
+        bool hasAirdrop;
+        // Creator address for this token
+        address creator;
+    }
+
+    struct UnclaimedFees {
+        uint128 unclaimed0;
+        uint128 unclaimed1;
+    }
 
     /*//////////////////////////////////////////////////////////////
                                 STORAGE
     //////////////////////////////////////////////////////////////*/
-    /// @dev The canonical Uniswap V3 factory contract.
+
+    /// @dev The canonical Uniswap V3 factory contract
     IUniswapV3Factory public immutable uniswapV3Factory;
 
-    /// @dev The canonical WETH token contract.
+    /// @dev The canonical WETH token contract
     address public immutable WETH;
 
-    /// @dev The Nonfungible Position Manager contract.
+    /// @dev The Nonfungible Position Manager contract
     INonfungiblePositionManager public immutable nonfungiblePositionManager;
 
-    /// @dev The mapping of banned names.
+    /// @dev The mapping of banned names
     mapping(string => bool) public bannedNames;
 
-    /// @dev The mapping of banned tickers.
+    /// @dev The mapping of banned tickers
     mapping(string => bool) public bannedTickers;
+
+    /// @dev The mapping from token address to its fee configuration
+    mapping(address => FeeConfig) public tokenFeeConfig;
+
+    /// @dev The mapping from token address to its liquidity position ID
+    mapping(address => uint256) public tokenPositionIds;
+
+    /// @dev The mapping from tokenId to creator's unclaimed fees
+    mapping(uint256 => UnclaimedFees) public creatorUnclaimedFees;
+
+    /// @dev The mapping from tokenId to protocol's unclaimed fees
+    mapping(uint256 => UnclaimedFees) public protocolUnclaimedFees;
+
+    /// @dev The Uniswap V3 Pool fee
+    uint24 public POOL_FEE = 10_000;
+
+    /// @dev The Uniswap V3 Tick spacing
+    int24 public TICK_SPACING = 200;
+
+    /// @dev Target market cap for new tokens in USD (30,000)
+    uint256 public constant TARGET_MARKET_CAP = 30_000 * 1e18;
+
+    /// @dev ETH price in USD (3,500)
+    uint256 public constant ETH_PRICE = 3500 * 1e18;
+
+    /// @dev Default fee configuration
+    FeeConfig public defaultFeeConfig = FeeConfig({
+        creatorLPFeeBps: 2000, // 20% of LP fees to creator
+        protocolBaseBps: 69, // 0.69% to protocol if no airdrop
+        creatorBaseBps: 46, // 0.46% to creator with airdrop
+        airdropBps: 23, // 0.23% to airdrop
+        hasAirdrop: false,
+        creator: address(0)
+    });
 
     /*//////////////////////////////////////////////////////////////
                               CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
+
     constructor(address _uniswapV3Factory, address _nonfungiblePositionManager, address _weth) Owned(msg.sender) {
         WETH = _weth;
         uniswapV3Factory = IUniswapV3Factory(_uniswapV3Factory);
@@ -47,109 +135,242 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
                              ADMIN CONTROLS
     //////////////////////////////////////////////////////////////*/
 
-    function setMaximumOwnerSupply() external onlyOwner {
+    function setDefaultFeeConfig(FeeConfig calldata newConfig) external onlyOwner {
+        if (newConfig.creatorLPFeeBps > 10_000) revert InvalidFeeSplit();
+        if (newConfig.protocolBaseBps + newConfig.creatorBaseBps + newConfig.airdropBps > 10_000) {
+            revert InvalidSupplyAllocation();
+        }
+        defaultFeeConfig = newConfig;
     }
 
-    function setProtocolFeeFromSupply() external onlyOwner {}
-
-    function setProtocolLPFeeSplit() external onlyOwner {}
-
-    /// @param name The name of the token to ban
-    /// @param status The status of the ban
     function banName(string memory name, bool status) external onlyOwner {
         bannedNames[name] = status;
     }
 
-    /// @param name The name of the token to ban
-    /// @param status The status of the ban
-    function banTicker(string memory name, bool status) external onlyOwner {
-        bannedTickers[name] = status;
+    function banTicker(string memory ticker, bool status) external onlyOwner {
+        bannedTickers[ticker] = status;
+    }
+
+    function setNewTickSpacing(uint24 newPoolFee) external onlyOwner {
+        POOL_FEE = newPoolFee;
+        TICK_SPACING = uniswapV3Factory.feeAmountTickSpacing(newPoolFee);
     }
 
     /*//////////////////////////////////////////////////////////////
                          RAINBOW TOKEN LAUNCHER
     //////////////////////////////////////////////////////////////*/
-    
-    error ReservedName();
-    error ReservedTicker();
 
-    error BannedName();
-    error BannedTicker();
-
-
-    function launchRainbowSuperToken(string memory name, string memory symbol, bytes32 merkleroot, uint256 supply, RainbowSuperToken.RainbowTokenMetadata memory metadata) public returns (RainbowSuperToken newToken) {
+    function launchRainbowSuperToken(
+        string memory name,
+        string memory symbol,
+        bytes32 merkleroot,
+        uint256 supply,
+        bool hasAirdrop,
+        RainbowSuperToken.RainbowTokenMetadata memory metadata
+    )
+        public
+        returns (RainbowSuperToken newToken)
+    {
+        // Name and ticker checks
         if (keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("Rainbow"))) {
             revert ReservedName();
         }
         if (keccak256(abi.encodePacked(symbol)) == keccak256(abi.encodePacked("RNBW"))) {
             revert ReservedTicker();
         }
+        if (bannedNames[name]) revert BannedName();
+        if (bannedTickers[symbol]) revert BannedTicker();
 
-        if (bannedNames[name]) {
-            revert BannedName();
-        }
-        if (bannedTickers[symbol]) {
-            revert BannedTicker();
-        }
+        (uint256 lpSupply, uint256 creatorAmount, uint256 airdropAmount) = calculateSupplyAllocation(supply, hasAirdrop);
 
-        newToken = new RainbowSuperToken(name, symbol, metadata, merkleroot, supply);
+        // Create token
+        newToken = new RainbowSuperToken(name, symbol, metadata, merkleroot, airdropAmount);
+        newToken.mint(msg.sender, creatorAmount);
 
-        address pool = uniswapV3Factory.createPool(address(newToken), WETH, UNI_FEE);
+        // Set up fee configuration
+        FeeConfig memory config = FeeConfig({
+            creatorLPFeeBps: defaultFeeConfig.creatorLPFeeBps,
+            protocolBaseBps: defaultFeeConfig.protocolBaseBps,
+            creatorBaseBps: defaultFeeConfig.creatorBaseBps,
+            airdropBps: defaultFeeConfig.airdropBps,
+            hasAirdrop: hasAirdrop,
+            creator: msg.sender
+        });
+        tokenFeeConfig[address(newToken)] = config;
+
+        // Create and initialize Uniswap V3 pool
+        address pool = uniswapV3Factory.createPool(address(newToken), WETH, POOL_FEE);
+        uint160 initialSqrtRatio = calculateInitialSqrtRatio(supply, address(newToken));
         IUniswapV3Pool(pool).initialize(initialSqrtRatio);
 
-        /// Supply the initial liquidity
+        // Provide initial liquidity
         INonfungiblePositionManager.MintParams memory params = INonfungiblePositionManager.MintParams({
-            token0: address(newToken),
-            token1: WETH,
-            fee: UNI_FEE,
-            tickLower: minUsableTick(UNI_TICK_SPACING),
-            tickUpper: maxUsableTick(UNI_TICK_SPACING),
-            amount0Desired: lpSupply_,
-            amount1Desired: ethLpAmount,
+            token0: address(newToken) < WETH ? address(newToken) : WETH,
+            token1: address(newToken) < WETH ? WETH : address(newToken),
+            fee: POOL_FEE,
+            tickLower: minUsableTick(TICK_SPACING),
+            tickUpper: maxUsableTick(TICK_SPACING),
+            amount0Desired: lpSupply,
+            amount1Desired: 0,
             amount0Min: 0,
             amount1Min: 0,
             recipient: address(this),
             deadline: block.timestamp
         });
-        token.approve(address(positionManager), lpSupply_);
-        (uint256 tokenId,,,) = positionManager.mint{value: ethLpAmount}(params);
+
+        newToken.approve(address(nonfungiblePositionManager), lpSupply);
+        (uint256 tokenId,,,) = nonfungiblePositionManager.mint(params);
+
+        // Store the position ID
+        tokenPositionIds[address(newToken)] = tokenId;
+
+        emit RainbowSuperTokenCreated(address(newToken), msg.sender);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                            FEE MANAGEMENT
+    //////////////////////////////////////////////////////////////*/
+
+    function calculateSupplyAllocation(
+        uint256 totalSupply,
+        bool hasAirdrop
+    )
+        public
+        view
+        returns (uint256 lpAmount, uint256 creatorAmount, uint256 airdropAmount)
+    {
+        if (hasAirdrop) {
+            creatorAmount = (totalSupply * defaultFeeConfig.creatorBaseBps) / 10_000;
+            airdropAmount = (totalSupply * defaultFeeConfig.airdropBps) / 10_000;
+        } else {
+            creatorAmount = (totalSupply * defaultFeeConfig.protocolBaseBps) / 10_000;
+            airdropAmount = 0;
+        }
+        lpAmount = totalSupply - creatorAmount - airdropAmount;
+    }
+
+    function collectFees(address token) external {
+        uint256 tokenId = tokenPositionIds[token];
+        if (tokenId == 0) revert InvalidToken();
+
+        // Get total fees
+        (uint256 totalFee0, uint256 totalFee1) = nonfungiblePositionManager.collect(
+            INonfungiblePositionManager.CollectParams({
+                tokenId: tokenId,
+                recipient: address(this),
+                amount0Max: type(uint128).max,
+                amount1Max: type(uint128).max
+            })
+        );
+
+        // Split fees according to configuration
+        FeeConfig memory config = tokenFeeConfig[token];
+        uint256 creatorFee0 = (totalFee0 * config.creatorLPFeeBps) / 10_000;
+        uint256 creatorFee1 = (totalFee1 * config.creatorLPFeeBps) / 10_000;
+        uint256 protocolFee0 = totalFee0 - creatorFee0;
+        uint256 protocolFee1 = totalFee1 - creatorFee1;
+
+        // Store unclaimed fees
+        creatorUnclaimedFees[tokenId].unclaimed0 += uint128(creatorFee0);
+        creatorUnclaimedFees[tokenId].unclaimed1 += uint128(creatorFee1);
+        protocolUnclaimedFees[tokenId].unclaimed0 += uint128(protocolFee0);
+        protocolUnclaimedFees[tokenId].unclaimed1 += uint128(protocolFee1);
+
+        emit FeesCollected(tokenId, creatorFee0, creatorFee1, protocolFee0, protocolFee1);
+    }
+
+    function claimCreatorFees(address token, address recipient) external {
+        if (msg.sender != tokenFeeConfig[token].creator) revert Unauthorized();
+        uint256 tokenId = tokenPositionIds[token];
+
+        UnclaimedFees memory fees = creatorUnclaimedFees[tokenId];
+        if (fees.unclaimed0 == 0 && fees.unclaimed1 == 0) revert NoFeesToClaim();
+
+        // Reset unclaimed fees before transfer
+        delete creatorUnclaimedFees[tokenId];
+
+        // Get token addresses in correct order
+        (address token0, address token1) = address(msg.sender) < WETH ? (msg.sender, WETH) : (WETH, msg.sender);
+
+        // Transfer fees
+        if (fees.unclaimed0 > 0) {
+            ERC20(token0).transfer(recipient, fees.unclaimed0);
+        }
+        if (fees.unclaimed1 > 0) {
+            ERC20(token1).transfer(recipient, fees.unclaimed1);
+        }
+
+        emit FeesClaimed(recipient, tokenId, fees.unclaimed0, fees.unclaimed1);
+    }
+
+    function claimProtocolFees(uint256 tokenId, address recipient) external onlyOwner {
+        UnclaimedFees memory fees = protocolUnclaimedFees[tokenId];
+        if (fees.unclaimed0 == 0 && fees.unclaimed1 == 0) revert NoFeesToClaim();
+
+        // Reset unclaimed fees before transfer
+        delete protocolUnclaimedFees[tokenId];
+
+        // Get token addresses in correct order
+        (address token0, address token1) = address(msg.sender) < WETH ? (msg.sender, WETH) : (WETH, msg.sender);
+
+        // Transfer fees
+        if (fees.unclaimed0 > 0) {
+            ERC20(token0).transfer(recipient, fees.unclaimed0);
+        }
+        if (fees.unclaimed1 > 0) {
+            ERC20(token1).transfer(recipient, fees.unclaimed1);
+        }
+
+        emit FeesClaimed(recipient, tokenId, fees.unclaimed0, fees.unclaimed1);
     }
 
     /*//////////////////////////////////////////////////////////////
                           POSITION MANAGEMENT
     //////////////////////////////////////////////////////////////*/
 
-    error NotUniswapPositionManager();
-
-    /// @param id The ID of the position to claim fees for
-    /// @param recipient The address to send the fees to
-    function claimFees(uint256 id, address recipient)
-        external
-        onlyOwner
-        returns (uint256 recipientFee0, uint256 recipientFee1)
-    {
-        // claim fees
-        (recipientFee0, recipientFee1) = nonfungiblePositionManager.collect(
-            INonfungiblePositionManager.CollectParams({
-                tokenId: id,
-                recipient: recipient,
-                amount0Max: type(uint128).max,
-                amount1Max: type(uint128).max
-            })
-        );
-    }
-
-    /// @notice Recieves an ERC721 token from the Nonfungible Position Manager.
-    function onERC721Received(address, address, uint256 id, bytes calldata)
-        external
-        virtual
-        override
-        returns (bytes4)
-    {
+    function onERC721Received(address, address, uint256, bytes calldata) external virtual override returns (bytes4) {
         if (msg.sender != address(nonfungiblePositionManager)) {
             revert NotUniswapPositionManager();
         }
 
         return ERC721TokenReceiver.onERC721Received.selector;
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                               TICK MATH
+    //////////////////////////////////////////////////////////////*/
+
+    function minUsableTick(int24 tickSpacing) internal pure returns (int24) {
+        return (TickMath.MIN_TICK / tickSpacing) * tickSpacing;
+    }
+
+    function maxUsableTick(int24 tickSpacing) internal pure returns (int24) {
+        return (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                            PRICE CALCULATION
+    //////////////////////////////////////////////////////////////*/
+
+    /// @notice Calculates the initial sqrt ratio for the pool based on target market cap
+    /// @param totalSupply The total supply of the token
+    /// @param rainbowToken The address of the RainbowSuperToken
+    /// @return The initial sqrt ratio X96
+    function calculateInitialSqrtRatio(uint256 totalSupply, address rainbowToken) public view returns (uint160) {
+        // Calculate token price in USD based on target market cap
+        // price = marketCap / totalSupply
+        uint256 tokenPriceUSD = (TARGET_MARKET_CAP * 1e18) / totalSupply;
+
+        // Both tokens have 18 decimals, but we need to handle ordering
+        // If RainbowToken is token0 (address < WETH):
+        // sqrtRatioX96 = sqrt(tokenPriceUSD/ethPrice) * 2^96
+        // If RainbowToken is token1 (address > WETH):
+        // sqrtRatioX96 = sqrt(ethPrice/tokenPriceUSD) * 2^96
+
+        bool rainbowIsToken0 = rainbowToken < WETH;
+        uint256 price0 = rainbowIsToken0 ? tokenPriceUSD : ETH_PRICE;
+        uint256 price1 = rainbowIsToken0 ? ETH_PRICE : tokenPriceUSD;
+
+        return uint160((((price0 << 96) / price1).sqrt() << 48));
     }
 }

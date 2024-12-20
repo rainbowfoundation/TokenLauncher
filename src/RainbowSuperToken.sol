@@ -8,7 +8,8 @@ import { ERC20 } from "lib/solmate/src/tokens/ERC20.sol";
 import { MerkleProofLib } from "lib/solady/src/utils/MerkleProofLib.sol";
 
 /// @title RainbowSuperToken
-/// @notice An implementation of ERC20 extending with IERC7802 to allow for unified use across the 
+/// @author CopyPaste - for Rainbow with love <3
+/// @notice An implementation of ERC20 extending with IERC7802 to allow for unified use across the
 ///     Superchain.
 contract RainbowSuperToken is ERC20, Owned {
     /*//////////////////////////////////////////////////////////////
@@ -32,7 +33,7 @@ contract RainbowSuperToken is ERC20, Owned {
     //////////////////////////////////////////////////////////////*/
     /// @dev The merkle root to be used for claims
     bytes32 public merkleRoot;
-    
+
     /// @dev The maximum total supply of the token that can be minted
     uint256 public maxTotalMintedSupply;
 
@@ -42,13 +43,15 @@ contract RainbowSuperToken is ERC20, Owned {
     /// @param _merkleRoot The merkle root to be used for claims
     /// @param _maxTotalMintedSupply The maximum total supply of the token that can be minted
     constructor(
-        string memory name, 
-        string memory symbol, 
-        RainbowTokenMetadata memory _metadata, 
+        string memory name,
+        string memory symbol,
+        RainbowTokenMetadata memory _metadata,
         bytes32 _merkleRoot,
         uint256 _maxTotalMintedSupply
-    ) ERC20(name, symbol, 18) Owned(msg.sender) {
-    
+    )
+        ERC20(name, symbol, 18)
+        Owned(msg.sender)
+    {
         metadata = _metadata;
         merkleRoot = _merkleRoot;
         maxTotalMintedSupply = _maxTotalMintedSupply;
@@ -66,7 +69,7 @@ contract RainbowSuperToken is ERC20, Owned {
 
     /// @dev Error emitted when the proof supplied is invalid
     error InvalidProof();
-    
+
     /// @dev Error emitted when a user has already claimed their tokens
     error AlreadyClaimed();
 
@@ -79,7 +82,7 @@ contract RainbowSuperToken is ERC20, Owned {
         claimed[msg.sender] = true;
 
         bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(msg.sender, amount))));
-        if (!MerkleProofLib.verifyCalldata(proof, merkleRoot, leaf)){
+        if (!MerkleProofLib.verifyCalldata(proof, merkleRoot, leaf)) {
             revert InvalidProof();
         }
 
@@ -124,7 +127,7 @@ contract RainbowSuperToken is ERC20, Owned {
     function tokenURI() public view returns (string memory) {
         return metadata.tokenURI;
     }
-    
+
     /// @notice Returns the description of the token.
     function description() public view returns (string memory) {
         return metadata.description;
@@ -149,10 +152,10 @@ contract RainbowSuperToken is ERC20, Owned {
     /*//////////////////////////////////////////////////////////////
                           SUPERCHAIN FUNCTIONS
     //////////////////////////////////////////////////////////////*/
-    
+
     /// @dev Error emitted for unauthorized access.
     error Unauthorized();
-    
+
     /// @dev The precompile for the superchain token bridge.
     address internal constant SUPERCHAIN_TOKEN_BRIDGE = 0x4200000000000000000000000000000000000028;
 
