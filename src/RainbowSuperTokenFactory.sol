@@ -7,17 +7,18 @@ import { ERC20 } from "lib/solmate/src/tokens/ERC20.sol";
 
 import { RainbowSuperToken } from "src/RainbowSuperToken.sol";
 
-import { TickMath } from "lib/v3-core/contracts/libraries/TickMath.sol";
+import { TickMath } from "vendor/v3-core/libraries/TickMath.sol";
 import { FixedPointMathLib } from "lib/solmate/src/utils/FixedPointMathLib.sol";
 
-import { IUniswapV3Pool } from "lib/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
-import { IUniswapV3Factory } from "lib/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
-import { INonfungiblePositionManager } from "v3-periphery/interfaces/INonfungiblePositionManager.sol";
+import { IUniswapV3Pool } from "vendor/v3-core/interfaces/IUniswapV3Pool.sol";
+import { IUniswapV3Factory } from "vendor/v3-core/interfaces/IUniswapV3Factory.sol";
+import { INonfungiblePositionManager } from "vendor/v3-periphery/interfaces/INonfungiblePositionManager.sol";
 
 /// @title RainbowSuperTokenFactory
 /// @author CopyPaste - for Rainbow with love <3
 /// @notice A factory contract for creating RainbowSuperTokens and managing their liquidity positions.
 contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
+    using TickMath for int24;
     using FixedPointMathLib for uint256;
 
     /*//////////////////////////////////////////////////////////////
@@ -33,6 +34,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     error InvalidSupplyAllocation();
     error NoFeesToClaim();
     error Unauthorized();
+    error IncorrectSalt();
     error InvalidToken();
 
     /*//////////////////////////////////////////////////////////////
@@ -165,6 +167,8 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         string memory symbol,
         bytes32 merkleroot,
         uint256 supply,
+        int24 initialTick,
+        bytes32 salt,
         bool hasAirdrop,
         RainbowSuperToken.RainbowTokenMetadata memory metadata
     )
@@ -184,7 +188,12 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         (uint256 lpSupply, uint256 creatorAmount, uint256 airdropAmount) = calculateSupplyAllocation(supply, hasAirdrop);
 
         // Create token
-        newToken = new RainbowSuperToken(name, symbol, metadata, merkleroot, airdropAmount);
+        newToken = new RainbowSuperToken{salt : keccak256(abi.encode(msg.sender, salt))}(name, symbol, metadata, merkleroot, airdropAmount);
+
+        if (address(newToken) > address(WETH)) {
+            revert IncorrectSalt();
+        }
+
         newToken.mint(msg.sender, creatorAmount);
 
         // Set up fee configuration
@@ -198,17 +207,19 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         });
         tokenFeeConfig[address(newToken)] = config;
 
-        // Create and initialize Uniswap V3 pool
         address pool = uniswapV3Factory.createPool(address(newToken), WETH, POOL_FEE);
-        uint160 initialSqrtRatio = calculateInitialSqrtRatio(supply, address(newToken));
+
+        uint160 initialSqrtRatio = initialTick.getSqrtRatioAtTick();
         IUniswapV3Pool(pool).initialize(initialSqrtRatio);
+        
+        newToken.mint(address(this), lpSupply);
 
         // Provide initial liquidity
         INonfungiblePositionManager.MintParams memory params = INonfungiblePositionManager.MintParams({
-            token0: address(newToken) < WETH ? address(newToken) : WETH,
-            token1: address(newToken) < WETH ? WETH : address(newToken),
+            token0: address(newToken),
+            token1: address(WETH),
             fee: POOL_FEE,
-            tickLower: minUsableTick(TICK_SPACING),
+            tickLower: initialTick,
             tickUpper: maxUsableTick(TICK_SPACING),
             amount0Desired: lpSupply,
             amount1Desired: 0,
@@ -348,29 +359,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         return (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            PRICE CALCULATION
-    //////////////////////////////////////////////////////////////*/
+    function getTickFromPrice(uint256 tokenSupply, uint256 wethMarketCap) internal pure returns (int24 tick) {
 
-    /// @notice Calculates the initial sqrt ratio for the pool based on target market cap
-    /// @param totalSupply The total supply of the token
-    /// @param rainbowToken The address of the RainbowSuperToken
-    /// @return The initial sqrt ratio X96
-    function calculateInitialSqrtRatio(uint256 totalSupply, address rainbowToken) public view returns (uint160) {
-        // Calculate token price in USD based on target market cap
-        // price = marketCap / totalSupply
-        uint256 tokenPriceUSD = (TARGET_MARKET_CAP * 1e18) / totalSupply;
-
-        // Both tokens have 18 decimals, but we need to handle ordering
-        // If RainbowToken is token0 (address < WETH):
-        // sqrtRatioX96 = sqrt(tokenPriceUSD/ethPrice) * 2^96
-        // If RainbowToken is token1 (address > WETH):
-        // sqrtRatioX96 = sqrt(ethPrice/tokenPriceUSD) * 2^96
-
-        bool rainbowIsToken0 = rainbowToken < WETH;
-        uint256 price0 = rainbowIsToken0 ? tokenPriceUSD : ETH_PRICE;
-        uint256 price1 = rainbowIsToken0 ? ETH_PRICE : tokenPriceUSD;
-
-        return uint160((((price0 << 96) / price1).sqrt() << 48));
     }
 }
