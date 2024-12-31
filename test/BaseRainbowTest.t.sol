@@ -28,40 +28,36 @@ contract BaseRainbowTest is Test {
     RainbowSuperToken.RainbowTokenMetadata public defaultMetadata;
 
     // Constants for testing
-    uint256 constant INITIAL_SUPPLY = 10 ether; 
+    uint256 constant INITIAL_SUPPLY = 10 ether;
     uint24 constant POOL_FEE = 10_000; // 1%
 
     function setUp() public virtual {
         vm.startPrank(owner);
-        
+
         uint256 id;
         assembly {
             id := chainid()
         }
 
         //if (id == 31337) {
-            // Deploy Uniswap V3 contracts
-            factory = new UniswapV3Factory();
-            weth = new WETH();
+        // Deploy Uniswap V3 contracts
+        factory = new UniswapV3Factory();
+        weth = new WETH();
 
-            // Deploy position manager
-            nftPositionManager = new NonfungiblePositionManager(
-                address(factory),
-                address(weth),
-                address(0) // No descriptor needed for testing
-            );
+        // Deploy position manager
+        nftPositionManager = new NonfungiblePositionManager(
+            address(factory),
+            address(weth),
+            address(0) // No descriptor needed for testing
+        );
         //} else {
         //    weth = WETH(payable(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2));
         //    factory = UniswapV3Factory(0x1F98431c8aD98523631AE4a59f267346ea31F984);
         //    nftPositionManager = NonfungiblePositionManager(payable(0xC36442b4a4522E871399CD717aBDD847Ab11FE88));
         //}
-        
+
         // Deploy Rainbow factory
-        rainbowFactory = new RainbowSuperTokenFactory(
-            address(factory),
-            address(nftPositionManager),
-            address(weth)
-        );
+        rainbowFactory = new RainbowSuperTokenFactory(address(factory), address(nftPositionManager), address(weth));
         vm.stopPrank();
     }
 }

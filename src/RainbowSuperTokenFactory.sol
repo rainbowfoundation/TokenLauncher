@@ -41,7 +41,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
                                  EVENTS
     //////////////////////////////////////////////////////////////*/
 
-    event RainbowSuperTokenCreated(address indexed token, address indexed owner);
+    event RainbowSuperTokenCreated(address indexed token, address indexed owner, address indexed creator);
     event FeeConfigUpdated(address indexed token, FeeConfig config);
     event FeesCollected(uint256 indexed tokenId, uint256 creatorFee0, uint256 creatorFee1, uint256 protocolFee0, uint256 protocolFee1);
     event FeesClaimed(address indexed recipient, uint256 indexed tokenId, uint256 amount0, uint256 amount1);
@@ -123,6 +123,8 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         creator: address(0)
     });
 
+    bytes32 public constant RainbowSuperTokenContractCodeHash = keccak256(type(RainbowSuperToken).creationCode);
+
     /*//////////////////////////////////////////////////////////////
                               CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
@@ -170,6 +172,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         int24 initialTick,
         bytes32 salt,
         bool hasAirdrop,
+        address deployer,
         RainbowSuperToken.RainbowTokenMetadata memory metadata
     )
         public
@@ -188,13 +191,13 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         (uint256 lpSupply, uint256 creatorAmount, uint256 airdropAmount) = calculateSupplyAllocation(supply, hasAirdrop);
 
         // Create token
-        newToken = new RainbowSuperToken{salt : keccak256(abi.encode(msg.sender, salt))}(name, symbol, metadata, merkleroot, airdropAmount);
+        newToken = new RainbowSuperToken{ salt: keccak256(abi.encode(deployer, salt)) }(name, symbol, metadata, merkleroot, airdropAmount);
 
         if (address(newToken) > address(WETH)) {
             revert IncorrectSalt();
         }
 
-        newToken.mint(msg.sender, creatorAmount);
+        newToken.mint(deployer, creatorAmount);
 
         // Set up fee configuration
         FeeConfig memory config = FeeConfig({
@@ -211,7 +214,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
 
         uint160 initialSqrtRatio = initialTick.getSqrtRatioAtTick();
         IUniswapV3Pool(pool).initialize(initialSqrtRatio);
-        
+
         newToken.mint(address(this), lpSupply);
 
         // Provide initial liquidity
@@ -235,7 +238,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         // Store the position ID
         tokenPositionIds[address(newToken)] = tokenId;
 
-        emit RainbowSuperTokenCreated(address(newToken), msg.sender);
+        emit RainbowSuperTokenCreated(address(newToken), deployer, msg.sender);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -359,7 +362,36 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         return (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
     }
 
-    function getTickFromPrice(uint256 tokenSupply, uint256 wethMarketCap) internal pure returns (int24 tick) {
+    /*//////////////////////////////////////////////////////////////
+                                 UTILS
+    //////////////////////////////////////////////////////////////*/
 
+    function predictTokenAddress(
+        address creator,
+        string memory name,
+        string memory symbol,
+        bytes32 merkleroot,
+        uint256 supply,
+        int24 initialTick,
+        bytes32 salt,
+        bool hasAirdrop,
+        RainbowSuperToken.RainbowTokenMetadata memory metadata
+    )
+        external
+        view
+        returns (address token)
+    {
+        bytes memory constructorArgs = abi.encode(name, symbol, merkleroot, supply, initialTick, salt, hasAirdrop, metadata);
+        bytes32 createSalt = keccak256(abi.encodePacked(creator, constructorArgs));
+
+        token = address(
+            uint160(
+                uint256(
+                    keccak256(bytes.concat(bytes32(uint256(uint160(address(this)))), createSalt, RainbowSuperTokenContractCodeHash, keccak256(constructorArgs)))
+                )
+            )
+        );
+
+        return address(uint160(uint256(keccak256(abi.encodePacked(RainbowSuperTokenContractCodeHash, creator, salt)))));
     }
 }
