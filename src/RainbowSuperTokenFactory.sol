@@ -204,8 +204,8 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         address deployer,
         RainbowSuperToken.RainbowTokenMetadata memory metadata
     ) payable external returns (RainbowSuperToken) {
-        (bool success, ) = payable(address(WETH)).call{ value: msg.value }("");
-        if (!success) revert InsufficientFunds();
+        if (msg.value == 0) revert InsufficientFunds();
+        WETH.deposit{ value: msg.value }();
 
         RainbowSuperToken token = launchRainbowSuperToken(name, symbol, merkleroot, supply, initialTick, salt, hasAirdrop, deployer, metadata);
 

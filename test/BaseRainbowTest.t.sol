@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 
 import { console } from "forge-std/console.sol";
 
+import { ISwapRouter } from "vendor/v3-periphery/interfaces/ISwapRouter.sol";
 import { Test } from "forge-std/Test.sol";
 import { SwapRouter } from "vendor/v3-periphery/SwapRouter.sol";
 import { NonfungiblePositionManager } from "vendor/v3-periphery/NonfungiblePositionManager.sol";
