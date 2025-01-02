@@ -31,7 +31,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         assertEq(token.totalSupply(), INITIAL_SUPPLY);
 
         // Get individual fee config components
-        (uint16 creatorLPFeeBps, uint16 protocolBaseBps, uint16 creatorBaseBps, uint16 airdropBps, bool hasAirdrop, address creator) =
+        (, , , , bool hasAirdrop, address creator) =
             rainbowFactory.tokenFeeConfig(address(token));
 
         assertEq(creator, creator1);
@@ -41,4 +41,5 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         uint256 positionId = rainbowFactory.tokenPositionIds(address(token));
         assertTrue(positionId > 0);
     }
+
 }

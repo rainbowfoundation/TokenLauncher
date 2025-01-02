@@ -10,6 +10,9 @@ import { RainbowSuperToken } from "src/RainbowSuperToken.sol";
 import { TickMath } from "vendor/v3-core/libraries/TickMath.sol";
 import { FixedPointMathLib } from "lib/solmate/src/utils/FixedPointMathLib.sol";
 
+import { ISwapRouter } from "vendor/v3-periphery/interfaces/ISwapRouter.sol";
+
+import { IWETH9 } from "vendor/v3-periphery/interfaces/external/IWETH9.sol";
 import { IUniswapV3Pool } from "vendor/v3-core/interfaces/IUniswapV3Pool.sol";
 import { IUniswapV3Factory } from "vendor/v3-core/interfaces/IUniswapV3Factory.sol";
 import { INonfungiblePositionManager } from "vendor/v3-periphery/interfaces/INonfungiblePositionManager.sol";
@@ -35,6 +38,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     error NoFeesToClaim();
     error Unauthorized();
     error IncorrectSalt();
+    error InsufficientFunds();
     error InvalidToken();
 
     /*//////////////////////////////////////////////////////////////
@@ -78,10 +82,13 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     IUniswapV3Factory public immutable uniswapV3Factory;
 
     /// @dev The canonical WETH token contract
-    address public immutable WETH;
+    IWETH9 public immutable WETH;
 
     /// @dev The Nonfungible Position Manager contract
     INonfungiblePositionManager public immutable nonfungiblePositionManager;
+
+    /// @dev The Uniswap V3 SwapRouter contract
+    ISwapRouter public immutable swapRouter;
 
     /// @dev The mapping of banned names
     mapping(string => bool) public bannedNames;
@@ -129,10 +136,13 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
                               CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
 
-    constructor(address _uniswapV3Factory, address _nonfungiblePositionManager, address _weth) Owned(msg.sender) {
-        WETH = _weth;
+    constructor(address _uniswapV3Factory, address _nonfungiblePositionManager, address _swapRouter, address _weth) Owned(msg.sender) {
+        WETH = IWETH9(payable(_weth));
+        swapRouter = ISwapRouter(_swapRouter);
         uniswapV3Factory = IUniswapV3Factory(_uniswapV3Factory);
         nonfungiblePositionManager = INonfungiblePositionManager(_nonfungiblePositionManager);
+
+        WETH.approve(_swapRouter, type(uint256).max);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -147,14 +157,22 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         defaultFeeConfig = newConfig;
     }
 
+    /// @notice Ban a name from being used
+    /// @param name The name to ban
+    /// @param status The status to set
     function banName(string memory name, bool status) external onlyOwner {
         bannedNames[name] = status;
     }
 
+    /// @notice Ban a ticker from being used
+    /// @param ticker The ticker to ban
+    /// @param status The status to set
     function banTicker(string memory ticker, bool status) external onlyOwner {
         bannedTickers[ticker] = status;
     }
 
+    /// @notice Set the new pool fee and tick spacing
+    /// @param newPoolFee The new pool fee to set
     function setNewTickSpacing(uint24 newPoolFee) external onlyOwner {
         POOL_FEE = newPoolFee;
         TICK_SPACING = uniswapV3Factory.feeAmountTickSpacing(newPoolFee);
@@ -164,6 +182,60 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
                          RAINBOW TOKEN LAUNCHER
     //////////////////////////////////////////////////////////////*/
 
+    /// @notice Launch a new RainbowSuperToken and buy initial tokens
+    /// @param name The name of the token
+    /// @param symbol The symbol of the token
+    /// @param merkleroot The merkle root for airdrop claims
+    /// @param supply The total supply of the token
+    /// @param initialTick The initial tick for the liquidity position
+    /// @param salt The salt for the token deployment
+    /// @param hasAirdrop Whether the token has airdrop enabled
+    /// @param deployer The address to grant the initial tokens to
+    ///
+    /// @return The newly created RainbowSuperToken
+    function launchRainbowSuperTokenAndBuy(
+        string memory name,
+        string memory symbol,
+        bytes32 merkleroot,
+        uint256 supply,
+        int24 initialTick,
+        bytes32 salt,
+        bool hasAirdrop,
+        address deployer,
+        RainbowSuperToken.RainbowTokenMetadata memory metadata
+    ) payable external returns (RainbowSuperToken) {
+        (bool success, ) = payable(address(WETH)).call{ value: msg.value }("");
+        if (!success) revert InsufficientFunds();
+
+        RainbowSuperToken token = launchRainbowSuperToken(name, symbol, merkleroot, supply, initialTick, salt, hasAirdrop, deployer, metadata);
+
+        ISwapRouter.ExactInputSingleParams memory swapParamsToken = ISwapRouter.ExactInputSingleParams({
+            tokenIn: address(WETH), // The token we are exchanging from (ETH wrapped as WETH)
+            tokenOut: address(token), // The token we are exchanging to
+            fee: POOL_FEE, // The pool fee
+            recipient: deployer, // The recipient address
+            deadline: block.timestamp, // The deadline for the swap
+            amountIn: msg.value, // The amount of ETH (WETH) to be swapped
+            amountOutMinimum: 0, // Minimum amount to receive
+            sqrtPriceLimitX96: 0 // No price limit
+        });
+
+        swapRouter.exactInputSingle(swapParamsToken);
+
+        return token;
+    }
+
+    /// @notice Launch a new RainbowSuperToken and buy initial tokens
+    /// @param name The name of the token
+    /// @param symbol The symbol of the token
+    /// @param merkleroot The merkle root for airdrop claims
+    /// @param supply The total supply of the token
+    /// @param initialTick The initial tick for the liquidity position
+    /// @param salt The salt for the token deployment
+    /// @param hasAirdrop Whether the token has airdrop enabled
+    /// @param deployer The address to grant the initial tokens to
+    ///
+    /// @return newToken The newly created RainbowSuperToken
     function launchRainbowSuperToken(
         string memory name,
         string memory symbol,
@@ -210,10 +282,10 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         });
         tokenFeeConfig[address(newToken)] = config;
 
-        address pool = uniswapV3Factory.createPool(address(newToken), WETH, POOL_FEE);
+        IUniswapV3Pool pool = IUniswapV3Pool(uniswapV3Factory.createPool(address(newToken), address(WETH), POOL_FEE));
 
         uint160 initialSqrtRatio = initialTick.getSqrtRatioAtTick();
-        IUniswapV3Pool(pool).initialize(initialSqrtRatio);
+        pool.initialize(initialSqrtRatio);
 
         newToken.mint(address(this), lpSupply);
 
@@ -245,11 +317,18 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
                             FEE MANAGEMENT
     //////////////////////////////////////////////////////////////*/
 
+    /// @notice Calculate the allocation of supply for LP, creator and airdrop
+    /// @param totalSupply The total supply of the token
+    /// @param hasAirdrop Whether the token has airdrop enabled
+    /// 
+    /// @return lpAmount The amount of tokens allocated to LP
+    /// @return creatorAmount The amount of tokens allocated to the creator
+    /// @return airdropAmount The amount of tokens allocated to airdrop
     function calculateSupplyAllocation(
         uint256 totalSupply,
         bool hasAirdrop
     )
-        public
+        internal
         view
         returns (uint256 lpAmount, uint256 creatorAmount, uint256 airdropAmount)
     {
@@ -263,6 +342,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         lpAmount = totalSupply - creatorAmount - airdropAmount;
     }
 
+    /// @param token The token address to collect fees for
     function collectFees(address token) external {
         uint256 tokenId = tokenPositionIds[token];
         if (tokenId == 0) revert InvalidToken();
@@ -293,6 +373,8 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         emit FeesCollected(tokenId, creatorFee0, creatorFee1, protocolFee0, protocolFee1);
     }
 
+    /// @param token The token address to claim fees for
+    /// @param recipient The recipient of the fees
     function claimCreatorFees(address token, address recipient) external {
         if (msg.sender != tokenFeeConfig[token].creator) revert Unauthorized();
         uint256 tokenId = tokenPositionIds[token];
@@ -304,7 +386,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         delete creatorUnclaimedFees[tokenId];
 
         // Get token addresses in correct order
-        (address token0, address token1) = address(msg.sender) < WETH ? (msg.sender, WETH) : (WETH, msg.sender);
+        (address token0, address token1) = address(msg.sender) < address(WETH) ? (msg.sender, address(WETH)) : (address(WETH), msg.sender);
 
         // Transfer fees
         if (fees.unclaimed0 > 0) {
@@ -317,6 +399,8 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         emit FeesClaimed(recipient, tokenId, fees.unclaimed0, fees.unclaimed1);
     }
 
+    /// @param tokenId The token address to claim fees for
+    /// @param recipient The recipient of the fees
     function claimProtocolFees(uint256 tokenId, address recipient) external onlyOwner {
         UnclaimedFees memory fees = protocolUnclaimedFees[tokenId];
         if (fees.unclaimed0 == 0 && fees.unclaimed1 == 0) revert NoFeesToClaim();
@@ -325,7 +409,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         delete protocolUnclaimedFees[tokenId];
 
         // Get token addresses in correct order
-        (address token0, address token1) = address(msg.sender) < WETH ? (msg.sender, WETH) : (WETH, msg.sender);
+        (address token0, address token1) = address(msg.sender) < address(WETH) ? (msg.sender, address(WETH)) : (address(WETH), msg.sender);
 
         // Transfer fees
         if (fees.unclaimed0 > 0) {
@@ -354,10 +438,8 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
                                TICK MATH
     //////////////////////////////////////////////////////////////*/
 
-    function minUsableTick(int24 tickSpacing) internal pure returns (int24) {
-        return (TickMath.MIN_TICK / tickSpacing) * tickSpacing;
-    }
-
+    /// @param tickSpacing The tick spacing to use
+    /// @return The maximum tick that can be used
     function maxUsableTick(int24 tickSpacing) internal pure returns (int24) {
         return (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
     }
@@ -366,6 +448,16 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
                                  UTILS
     //////////////////////////////////////////////////////////////*/
 
+    /// @notice Predict the address of a token, used to determine salt offchain
+    /// @param creator The creator of the token (msg.sender)
+    /// @param name The name of the token
+    /// @param symbol The symbol of the token
+    /// @param merkleroot The merkle root for airdrop claims
+    /// @param supply The total supply of the token
+    /// @param initialTick The initial tick for the liquidity position
+    /// @param salt The salt for the token deployment
+    /// @param hasAirdrop Whether the token has airdrop enabled
+    /// @param metadata The metadata for the token
     function predictTokenAddress(
         address creator,
         string memory name,

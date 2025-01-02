@@ -6,8 +6,6 @@ import '@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol';
 import '@uniswap/v3-core/contracts/interfaces/callback/IUniswapV3MintCallback.sol';
 import '@uniswap/v3-core/contracts/libraries/TickMath.sol';
 
-import { console } from "forge-std/console.sol";
-
 import '../libraries/PoolAddress.sol';
 import '../libraries/CallbackValidation.sol';
 import '../libraries/LiquidityAmounts.sol';
@@ -50,7 +48,7 @@ abstract contract LiquidityManagement is IUniswapV3MintCallback, PeripheryImmuta
     }
 
     /// @notice Add liquidity to an initialized pool
-    function addLiquidity(AddLiquidityParams memory params, address _factory)
+    function addLiquidity(AddLiquidityParams memory params)
         internal
         returns (
             uint128 liquidity,
@@ -79,8 +77,6 @@ abstract contract LiquidityManagement is IUniswapV3MintCallback, PeripheryImmuta
                 params.amount0Desired,
                 params.amount1Desired
             );
-
-            console.log(params.amount1Desired);
         }
 
 

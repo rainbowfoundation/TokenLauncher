@@ -150,8 +150,7 @@ contract NonfungiblePositionManager is
                 amount1Desired: params.amount1Desired,
                 amount0Min: params.amount0Min,
                 amount1Min: params.amount1Min
-            }),
-            factory
+            })
         );
 
         _mint(params.recipient, (tokenId = _nextId++));
@@ -223,8 +222,7 @@ contract NonfungiblePositionManager is
                 amount0Min: params.amount0Min,
                 amount1Min: params.amount1Min,
                 recipient: address(this)
-            }),
-            factory
+            })
         );
 
         bytes32 positionKey = PositionKey.compute(address(this), position.tickLower, position.tickUpper);

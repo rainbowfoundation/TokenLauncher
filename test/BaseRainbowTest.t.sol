@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 import { console } from "forge-std/console.sol";
 
 import { Test } from "forge-std/Test.sol";
+import { SwapRouter } from "vendor/v3-periphery/SwapRouter.sol";
 import { NonfungiblePositionManager } from "vendor/v3-periphery/NonfungiblePositionManager.sol";
 import { UniswapV3Factory } from "vendor/v3-core/UniswapV3Factory.sol";
 import { WETH } from "test/mocks/WETH.sol";
@@ -15,6 +16,7 @@ contract BaseRainbowTest is Test {
     NonfungiblePositionManager public nftPositionManager;
     UniswapV3Factory public factory;
     WETH public weth;
+    SwapRouter public swapRouter;
     RainbowSuperTokenFactory public rainbowFactory;
 
     // Test accounts
@@ -44,6 +46,8 @@ contract BaseRainbowTest is Test {
         factory = new UniswapV3Factory();
         weth = new WETH();
 
+        swapRouter = new SwapRouter(address(factory), address(weth));
+
         // Deploy position manager
         nftPositionManager = new NonfungiblePositionManager(
             address(factory),
@@ -57,7 +61,7 @@ contract BaseRainbowTest is Test {
         //}
 
         // Deploy Rainbow factory
-        rainbowFactory = new RainbowSuperTokenFactory(address(factory), address(nftPositionManager), address(weth));
+        rainbowFactory = new RainbowSuperTokenFactory(address(factory), address(nftPositionManager), address(swapRouter), address(weth));
         vm.stopPrank();
     }
 }
