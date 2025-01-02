@@ -6,14 +6,13 @@ import { Merkle } from "lib/murky/src/Merkle.sol";
 import { RainbowSuperToken } from "../src/RainbowSuperToken.sol";
 
 contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
-
     RainbowSuperToken public token;
 
     bytes32 public root;
     Merkle public merkle;
     bytes32[] public _data;
 
-    function setUp() override public {
+    function setUp() public override {
         super.setUp();
 
         uint256 amount = 100e18;
@@ -38,7 +37,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
             telegramUrl: "https://t.me/test"
         });
 
-        token = new RainbowSuperToken("Test Token", "TEST", defaultMetadata, root, 1_000 ether);
+        token = new RainbowSuperToken("Test Token", "TEST", defaultMetadata, root, 1000 ether);
     }
 
     function testClaim() public {
@@ -59,7 +58,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
 
         for (uint256 i = 1; i < 100; i++) {
             proof = merkle.getProof(_data, i);
-            
+
             if (token.maxTotalMintedSupply() < token.totalSupply() + amount) {
                 vm.startPrank(vm.addr(i));
                 vm.expectRevert();
@@ -79,7 +78,6 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         token.claim(proof, recipient, amount);
     }
 
-    
     address internal constant SUPERCHAIN_TOKEN_BRIDGE = 0x4200000000000000000000000000000000000028;
 
     function testOnlySuperchainBridgeCanMint(uint256 amount) public {
@@ -108,7 +106,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         assertEq(token.balanceOf(address(this)), initialBalance - amount);
     }
 
-    function testTokenMetaData() view public {
+    function testTokenMetaData() public view {
         assertEq(token.name(), "Test Token");
         assertEq(token.symbol(), "TEST");
         assertEq(token.decimals(), 18);
@@ -120,7 +118,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         assertEq(token.telegramUrl(), "https://t.me/test");
     }
 
-    function testTokenSupportsInterfaces() view public {
+    function testTokenSupportsInterfaces() public view {
         assertTrue(token.supportsInterface(0x33331994)); // ERC7802 Interface ID
         assertTrue(token.supportsInterface(0x36372b07)); // ERC20 Interface ID
         assertTrue(token.supportsInterface(0x01ffc9a7)); // ERC165 Interface ID

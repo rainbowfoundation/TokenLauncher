@@ -203,7 +203,11 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         bool hasAirdrop,
         address deployer,
         RainbowSuperToken.RainbowTokenMetadata memory metadata
-    ) payable external returns (RainbowSuperToken) {
+    )
+        external
+        payable
+        returns (RainbowSuperToken)
+    {
         if (msg.value == 0) revert InsufficientFunds();
         WETH.deposit{ value: msg.value }();
 
@@ -218,7 +222,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
             amountIn: msg.value, // The amount of ETH (WETH) to be swapped
             amountOutMinimum: 0, // Minimum amount to receive
             sqrtPriceLimitX96: 0 // No price limit
-        });
+         });
 
         swapRouter.exactInputSingle(swapParamsToken);
 
@@ -320,7 +324,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @notice Calculate the allocation of supply for LP, creator and airdrop
     /// @param totalSupply The total supply of the token
     /// @param hasAirdrop Whether the token has airdrop enabled
-    /// 
+    ///
     /// @return lpAmount The amount of tokens allocated to LP
     /// @return creatorAmount The amount of tokens allocated to the creator
     /// @return airdropAmount The amount of tokens allocated to airdrop
