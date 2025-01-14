@@ -117,9 +117,6 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @dev Target market cap for new tokens in USD (30,000)
     uint256 public constant TARGET_MARKET_CAP = 30_000 * 1e18;
 
-    /// @dev ETH price in USD (3,500)
-    uint256 public constant ETH_PRICE = 3500 * 1e18;
-
     /// @dev Default fee configuration
     FeeConfig public defaultFeeConfig = FeeConfig({
         creatorLPFeeBps: 2000, // 20% of LP fees to creator
