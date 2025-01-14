@@ -458,7 +458,6 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @param symbol The symbol of the token
     /// @param merkleroot The merkle root for airdrop claims
     /// @param supply The total supply of the token
-    /// @param initialTick The initial tick for the liquidity position
     /// @param salt The salt for the token deployment
     /// @param hasAirdrop Whether the token has airdrop enabled
     /// @param metadata The metadata for the token
@@ -468,7 +467,6 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         string memory symbol,
         bytes32 merkleroot,
         uint256 supply,
-        int24 initialTick,
         bytes32 salt,
         bool hasAirdrop,
         RainbowSuperToken.RainbowTokenMetadata memory metadata
@@ -477,17 +475,24 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         view
         returns (address token)
     {
-        bytes memory constructorArgs = abi.encode(name, symbol, merkleroot, supply, initialTick, salt, hasAirdrop, metadata);
-        bytes32 createSalt = keccak256(abi.encodePacked(creator, constructorArgs));
+        (, , uint256 airdropAmount) = calculateSupplyAllocation(supply, hasAirdrop);
+        
+        bytes memory constructorArgs = abi.encode(name, symbol, metadata, merkleroot, airdropAmount);
+        bytes32 createSalt = keccak256(abi.encode(creator, salt));
 
         token = address(
             uint160(
                 uint256(
-                    keccak256(bytes.concat(bytes32(uint256(uint160(address(this)))), createSalt, RainbowSuperTokenContractCodeHash, keccak256(constructorArgs)))
+                    keccak256(
+                        abi.encodePacked(
+                            bytes1(0xFF),
+                            address(this), 
+                            createSalt, 
+                            keccak256(bytes.concat(type(RainbowSuperToken).creationCode, constructorArgs))
+                        )
+                    )
                 )
             )
         );
-
-        return address(uint160(uint256(keccak256(abi.encodePacked(RainbowSuperTokenContractCodeHash, creator, salt)))));
     }
 }

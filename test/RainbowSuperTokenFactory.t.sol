@@ -32,7 +32,6 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         string memory symbol,
         bytes32 merkleroot,
         uint256 supply,
-        int24 initialTick,
         bool hasAirdrop,
         RainbowSuperToken.RainbowTokenMetadata memory metadata
     )
@@ -44,7 +43,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         bool foundValid = false;
 
         while (!foundValid) {
-            address predicted = rainbowFactory.predictTokenAddress(creator, name, symbol, merkleroot, supply, initialTick, currentSalt, hasAirdrop, metadata);
+            address predicted = rainbowFactory.predictTokenAddress(creator, name, symbol, merkleroot, supply, currentSalt, hasAirdrop, metadata);
 
             if (predicted < address(weth)) {
                 return (currentSalt, predicted);
@@ -54,10 +53,21 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         revert("No valid salt found");
     }
 
+    function testPredictAddress() public {
+        vm.startPrank(creator1);
+        
+        address predicted = rainbowFactory.predictTokenAddress(creator1, "Test Token", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, bytes32(uint256(50)), false, defaultMetadata);
+
+        RainbowSuperToken token =
+            rainbowFactory.launchRainbowSuperToken("Test Token", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, 200, bytes32(uint256(50)), false, address(creator1), defaultMetadata);
+
+        assertEq(predicted, address(token));
+    }
+
     function testLaunchToken() public {
         vm.startPrank(creator1);
 
-        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, 200, false, defaultMetadata);
+        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, false, defaultMetadata);
 
         RainbowSuperToken token =
             rainbowFactory.launchRainbowSuperToken("Test Token", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, false, address(this), defaultMetadata);
@@ -79,7 +89,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
     function testLaunchTokenWithAirdrop() public {
         vm.startPrank(creator1);
 
-        (bytes32 salt,) = findValidSalt(creator1, "Airdrop Token", "AIR", MERKLE_ROOT, INITIAL_SUPPLY, 200, true, defaultMetadata);
+        (bytes32 salt,) = findValidSalt(creator1, "Airdrop Token", "AIR", MERKLE_ROOT, INITIAL_SUPPLY, true, defaultMetadata);
 
         vm.expectEmit(false, true, true, true);
         emit RainbowSuperTokenFactory.RainbowSuperTokenCreated(address(0), address(this), creator1);
@@ -103,7 +113,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
     function testCannotLaunchReservedName() public {
         vm.startPrank(creator1);
 
-        (bytes32 salt,) = findValidSalt(creator1, "Rainbow", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, 200, false, defaultMetadata);
+        (bytes32 salt,) = findValidSalt(creator1, "Rainbow", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, false, defaultMetadata);
 
         vm.expectRevert(RainbowSuperTokenFactory.ReservedName.selector);
         rainbowFactory.launchRainbowSuperToken("Rainbow", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, false, address(this), defaultMetadata);
@@ -113,7 +123,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
     function testCannotLaunchReservedTicker() public {
         vm.startPrank(creator1);
 
-        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "RNBW", MERKLE_ROOT, INITIAL_SUPPLY, 200, false, defaultMetadata);
+        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "RNBW", MERKLE_ROOT, INITIAL_SUPPLY, false, defaultMetadata);
 
         vm.expectRevert(RainbowSuperTokenFactory.ReservedTicker.selector);
         rainbowFactory.launchRainbowSuperToken("Test Token", "RNBW", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, false, address(this), defaultMetadata);
@@ -126,7 +136,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
 
         vm.startPrank(creator1);
 
-        (bytes32 salt,) = findValidSalt(creator1, "Banned", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, 200, false, defaultMetadata);
+        (bytes32 salt,) = findValidSalt(creator1, "Banned", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, false, defaultMetadata);
 
         vm.expectRevert(RainbowSuperTokenFactory.BannedName.selector);
         rainbowFactory.launchRainbowSuperToken("Banned", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, false, address(this), defaultMetadata);
@@ -139,7 +149,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
 
         vm.startPrank(creator1);
 
-        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "BAN", MERKLE_ROOT, INITIAL_SUPPLY, 200, false, defaultMetadata);
+        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "BAN", MERKLE_ROOT, INITIAL_SUPPLY, false, defaultMetadata);
 
         vm.expectRevert(RainbowSuperTokenFactory.BannedTicker.selector);
         rainbowFactory.launchRainbowSuperToken("Test Token", "BAN", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, false, address(this), defaultMetadata);
@@ -163,7 +173,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         // Launch a token with new config
         vm.startPrank(creator1);
 
-        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, 200, false, defaultMetadata);
+        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, false, defaultMetadata);
 
         RainbowSuperToken token =
             rainbowFactory.launchRainbowSuperToken("Test Token", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, false, address(this), defaultMetadata);
@@ -178,7 +188,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
     function testCannotUnauthorizedFeeClaim() public {
         vm.startPrank(creator1);
 
-        (bytes32 salt,) = findValidSalt(creator1, "Fee Token", "FEE", MERKLE_ROOT, INITIAL_SUPPLY, 200, false, defaultMetadata);
+        (bytes32 salt,) = findValidSalt(creator1, "Fee Token", "FEE", MERKLE_ROOT, INITIAL_SUPPLY, false, defaultMetadata);
 
         RainbowSuperToken token =
             rainbowFactory.launchRainbowSuperToken("Fee Token", "FEE", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, false, creator1, defaultMetadata);
@@ -195,7 +205,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
     function testLaunchTokenWithBuy() public {
         vm.startPrank(creator1);
 
-        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, 200, false, defaultMetadata);
+        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, false, defaultMetadata);
 
         vm.deal(creator1, 1 ether);
 
@@ -220,7 +230,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
     function testCollectAndClaimFees() public {
         vm.startPrank(creator1);
 
-        (bytes32 salt,) = findValidSalt(creator1, "Fee Token", "FEE", MERKLE_ROOT, INITIAL_SUPPLY, 200, false, defaultMetadata);
+        (bytes32 salt,) = findValidSalt(creator1, "Fee Token", "FEE", MERKLE_ROOT, INITIAL_SUPPLY, false, defaultMetadata);
 
         // Launch token
         RainbowSuperToken token =
