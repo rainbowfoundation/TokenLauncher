@@ -62,7 +62,7 @@ contract SwapRouter is
     ) external override {
         require(amount0Delta > 0 || amount1Delta > 0); // swaps entirely within 0-liquidity regions are not supported
         SwapCallbackData memory data = abi.decode(_data, (SwapCallbackData));
-        (address tokenIn, address tokenOut, uint24 fee) = data.path.decodeFirstPool();
+        (address tokenIn, address tokenOut, ) = data.path.decodeFirstPool();
         //CallbackValidation.verifyCallback(factory, tokenIn, tokenOut, fee);
 
         (bool isExactInput, uint256 amountToPay) = amount0Delta > 0
