@@ -114,9 +114,6 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @dev The Uniswap V3 Tick spacing
     int24 public TICK_SPACING = 200;
 
-    /// @dev Target market cap for new tokens in USD (30,000)
-    uint256 public constant TARGET_MARKET_CAP = 30_000 * 1e18;
-
     /// @dev Default fee configuration
     FeeConfig public defaultFeeConfig = FeeConfig({
         creatorLPFeeBps: 2000, // 20% of LP fees to creator
