@@ -90,6 +90,7 @@ contract RainbowSuperToken is ERC20, Owned {
             amount = maxTotalMintedSupply - totalMintedSupply;
         }
 
+        totalMintedSupply += amount;
         totalSupply += amount;
 
         // Mint the points to the recipient

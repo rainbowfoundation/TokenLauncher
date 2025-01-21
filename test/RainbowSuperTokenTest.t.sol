@@ -18,10 +18,10 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         uint256 amount = 100e18;
 
         merkle = new Merkle();
-        _data = new bytes32[](100);
-        address[] memory recipients = new address[](100);
-        uint256[] memory amounts = new uint256[](100);
-        for (uint256 i = 1; i < 100; i++) {
+        _data = new bytes32[](200);
+        address[] memory recipients = new address[](200);
+        uint256[] memory amounts = new uint256[](200);
+        for (uint256 i = 1; i < 200; i++) {
             recipients[i - 1] = vm.addr(i);
             _data[i] = bytes32(keccak256(bytes.concat(keccak256(abi.encode(vm.addr(i), amount)))));
             amounts[i - 1] = amount;
@@ -37,10 +37,48 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
             telegramUrl: "https://t.me/test"
         });
 
-        token = new RainbowSuperToken("Test Token", "TEST", defaultMetadata, root, 1000 ether);
+        token = new RainbowSuperToken("Test Token", "TEST", defaultMetadata, root, amount * 100);
     }
 
     function testClaim() public {
+        uint256 amount = 100e18;
+        address recipient = vm.addr(1);
+        bytes32[] memory proof = merkle.getProof(_data, 1);
+
+        uint256 initialBalance = token.balanceOf(recipient);
+
+        vm.startPrank(vm.addr(1));
+        token.claim(proof, recipient, amount);
+
+        assertEq(token.balanceOf(recipient), initialBalance + amount);
+
+        vm.expectRevert(RainbowSuperToken.AlreadyClaimed.selector);
+        token.claim(proof, recipient, amount);
+        vm.stopPrank();
+
+        for (uint256 i = 2; i < 101; i++) {
+            proof = merkle.getProof(_data, i);
+            address _user = vm.addr(i);
+
+            uint256 _initialBalance = token.balanceOf(_user);
+            vm.prank(_user);
+            token.claim(proof, _user, amount);
+
+            assertEq(token.balanceOf(_user), _initialBalance + amount);
+        }
+
+        // No tokens after we've claimed all of the alloted supply
+        address user = vm.addr(106);
+        proof = merkle.getProof(_data, 106);
+        
+        initialBalance = token.balanceOf(user);
+        vm.prank(user);
+        token.claim(proof, user, amount);
+
+        assertEq(token.balanceOf(user), 0);
+    }
+    /*
+    function testClaimBeyondAllotted() public {
         uint256 amount = 100e18;
         address recipient = vm.addr(1);
         bytes32[] memory proof = merkle.getProof(_data, 1);
@@ -67,7 +105,8 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
                 return;
             }
         }
-    }
+
+    } */
 
     function testCannotUseAFalseClaim() public {
         uint256 amount = 100e18;
