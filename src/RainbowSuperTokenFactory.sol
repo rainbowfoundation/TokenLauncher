@@ -183,7 +183,6 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @param supply The total supply of the token
     /// @param initialTick The initial tick for the liquidity position
     /// @param salt The salt for the token deployment
-    /// @param hasAirdrop Whether the token has airdrop enabled
     /// @param deployer The address to grant the initial tokens to
     ///
     /// @return The newly created RainbowSuperToken
@@ -194,7 +193,6 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         uint256 supply,
         int24 initialTick,
         bytes32 salt,
-        bool hasAirdrop,
         address deployer,
         RainbowSuperToken.RainbowTokenMetadata memory metadata
     )
@@ -205,7 +203,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         if (msg.value == 0) revert InsufficientFunds();
         WETH.deposit{ value: msg.value }();
 
-        RainbowSuperToken token = launchRainbowSuperToken(name, symbol, merkleroot, supply, initialTick, salt, hasAirdrop, deployer, metadata);
+        RainbowSuperToken token = launchRainbowSuperToken(name, symbol, merkleroot, supply, initialTick, salt, deployer, metadata);
 
         ISwapRouter.ExactInputSingleParams memory swapParamsToken = ISwapRouter.ExactInputSingleParams({
             tokenIn: address(WETH), // The token we are exchanging from (ETH wrapped as WETH)
@@ -230,7 +228,6 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @param supply The total supply of the token
     /// @param initialTick The initial tick for the liquidity position
     /// @param salt The salt for the token deployment
-    /// @param hasAirdrop Whether the token has airdrop enabled
     /// @param deployer The address to grant the initial tokens to
     ///
     /// @return newToken The newly created RainbowSuperToken
@@ -241,7 +238,6 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         uint256 supply,
         int24 initialTick,
         bytes32 salt,
-        bool hasAirdrop,
         address deployer,
         RainbowSuperToken.RainbowTokenMetadata memory metadata
     )
@@ -258,10 +254,17 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         if (bannedNames[name]) revert BannedName();
         if (bannedTickers[symbol]) revert BannedTicker();
 
+        bool hasAirdrop = merkleroot != bytes32(0);
+
         (uint256 lpSupply, uint256 creatorAmount, uint256 airdropAmount) = calculateSupplyAllocation(supply, hasAirdrop);
 
+        uint256 id;
+        assembly {
+            id := chainid()
+        }
+
         // Create token
-        newToken = new RainbowSuperToken{ salt: keccak256(abi.encode(deployer, salt)) }(name, symbol, metadata, merkleroot, airdropAmount);
+        newToken = new RainbowSuperToken{ salt: keccak256(abi.encode(deployer, salt)) }(name, symbol, metadata, merkleroot, airdropAmount, id);
 
         if (address(newToken) > address(WETH)) {
             revert IncorrectSalt();
@@ -309,6 +312,41 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         tokenPositionIds[address(newToken)] = tokenId;
 
         emit RainbowSuperTokenCreated(address(newToken), deployer, msg.sender);
+    }
+
+    /// @notice Launch a new RainbowSuperToken and buy initial tokens
+    /// @param name The name of the token
+    /// @param symbol The symbol of the token
+    /// @param merkleroot The merkle root for airdrop claims
+    /// @param supply The total supply of the token
+    /// @param salt The salt for the token deployment
+    /// @param deployer The address to grant the initial tokens to
+    ///
+    /// @return newToken The newly created RainbowSuperToken
+    function launchFromOtherChain(
+        string memory name,
+        string memory symbol,
+        bytes32 merkleroot,
+        uint256 supply,
+        bytes32 salt,
+        address deployer,
+        RainbowSuperToken.RainbowTokenMetadata memory metadata,
+        uint256 originalChainId
+    )
+        external
+        returns (RainbowSuperToken newToken)
+    {
+        uint256 id;
+        assembly {
+            id := chainid()
+        }
+
+        if (originalChainId == id) revert Unauthorized();
+
+        bool hasAirdrop = merkleroot != bytes32(0);
+        (,, uint256 airdropAmount) = calculateSupplyAllocation(supply, hasAirdrop);
+
+        newToken = new RainbowSuperToken{ salt: keccak256(abi.encode(deployer, salt)) }(name, symbol, metadata, merkleroot, airdropAmount, id);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -384,7 +422,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         delete creatorUnclaimedFees[tokenId];
 
         // Get token addresses in correct order
-        (address token0, address token1) = address(msg.sender) < address(WETH) ? (msg.sender, address(WETH)) : (address(WETH), msg.sender);
+        (address token0, address token1) = address(token) < address(WETH) ? (token, address(WETH)) : (address(WETH), token);
 
         // Transfer fees
         if (fees.unclaimed0 > 0) {
@@ -397,9 +435,11 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         emit FeesClaimed(recipient, tokenId, fees.unclaimed0, fees.unclaimed1);
     }
 
-    /// @param tokenId The token address to claim fees for
+    /// @param token The token address to claim fees for
     /// @param recipient The recipient of the fees
-    function claimProtocolFees(uint256 tokenId, address recipient) external onlyOwner {
+    function claimProtocolFees(address token, address recipient) external onlyOwner {
+        uint256 tokenId = tokenPositionIds[token];
+
         UnclaimedFees memory fees = protocolUnclaimedFees[tokenId];
         if (fees.unclaimed0 == 0 && fees.unclaimed1 == 0) revert NoFeesToClaim();
 
@@ -407,7 +447,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         delete protocolUnclaimedFees[tokenId];
 
         // Get token addresses in correct order
-        (address token0, address token1) = address(msg.sender) < address(WETH) ? (msg.sender, address(WETH)) : (address(WETH), msg.sender);
+        (address token0, address token1) = address(token) < address(WETH) ? (token, address(WETH)) : (address(WETH), token);
 
         // Transfer fees
         if (fees.unclaimed0 > 0) {
@@ -453,7 +493,6 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @param merkleroot The merkle root for airdrop claims
     /// @param supply The total supply of the token
     /// @param salt The salt for the token deployment
-    /// @param hasAirdrop Whether the token has airdrop enabled
     /// @param metadata The metadata for the token
     function predictTokenAddress(
         address creator,
@@ -462,13 +501,13 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         bytes32 merkleroot,
         uint256 supply,
         bytes32 salt,
-        bool hasAirdrop,
         RainbowSuperToken.RainbowTokenMetadata memory metadata
     )
         external
         view
         returns (address token)
     {
+        bool hasAirdrop = merkleroot != bytes32(0);
         (,, uint256 airdropAmount) = calculateSupplyAllocation(supply, hasAirdrop);
 
         bytes memory constructorArgs = abi.encode(name, symbol, metadata, merkleroot, airdropAmount);

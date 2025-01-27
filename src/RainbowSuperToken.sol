@@ -37,6 +37,9 @@ contract RainbowSuperToken is ERC20, Owned {
     /// @dev The maximum total supply of the token that can be minted
     uint256 public maxTotalMintedSupply;
 
+    /// @dev Original Chain the token was deployed on
+    uint256 public immutable originalChainId;
+
     /// @param name The name of the token
     /// @param symbol The symbol of the token
     /// @param _metadata The metadata for the token
@@ -47,7 +50,8 @@ contract RainbowSuperToken is ERC20, Owned {
         string memory symbol,
         RainbowTokenMetadata memory _metadata,
         bytes32 _merkleRoot,
-        uint256 _maxTotalMintedSupply
+        uint256 _maxTotalMintedSupply,
+        uint256 _originalChainId
     )
         ERC20(name, symbol, 18)
         Owned(msg.sender)
@@ -55,6 +59,16 @@ contract RainbowSuperToken is ERC20, Owned {
         metadata = _metadata;
         merkleRoot = _merkleRoot;
         maxTotalMintedSupply = _maxTotalMintedSupply;
+        originalChainId = _originalChainId;
+    }
+
+    modifier onlyOriginalChain() {
+        uint256 id;
+        assembly {
+            id := chainid()
+        }
+        if (id != originalChainId) revert Unauthorized();
+        _;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -76,7 +90,7 @@ contract RainbowSuperToken is ERC20, Owned {
     /// @param proof The merkle proof to verify the claim
     /// @param recipient The address to mint the tokens to
     /// @param amount The amount of tokens to mint
-    function claim(bytes32[] calldata proof, address recipient, uint256 amount) external {
+    function claim(bytes32[] calldata proof, address recipient, uint256 amount) external onlyOriginalChain {
         if (claimed[msg.sender]) revert AlreadyClaimed();
 
         claimed[msg.sender] = true;
@@ -101,7 +115,7 @@ contract RainbowSuperToken is ERC20, Owned {
 
     /// @param recipient The address to mint the tokens to
     /// @param amount The amount of tokens to mint
-    function mint(address recipient, uint256 amount) external onlyOwner {
+    function mint(address recipient, uint256 amount) external onlyOriginalChain onlyOwner {
         _mint(recipient, amount);
     }
 

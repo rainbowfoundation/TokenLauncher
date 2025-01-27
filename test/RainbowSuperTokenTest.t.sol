@@ -70,43 +70,13 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         // No tokens after we've claimed all of the alloted supply
         address user = vm.addr(106);
         proof = merkle.getProof(_data, 106);
-        
+
         initialBalance = token.balanceOf(user);
         vm.prank(user);
         token.claim(proof, user, amount);
 
         assertEq(token.balanceOf(user), 0);
     }
-    /*
-    function testClaimBeyondAllotted() public {
-        uint256 amount = 100e18;
-        address recipient = vm.addr(1);
-        bytes32[] memory proof = merkle.getProof(_data, 1);
-
-        uint256 initialBalance = token.balanceOf(recipient);
-
-        vm.startPrank(vm.addr(1));
-        token.claim(proof, recipient, amount);
-
-        assertEq(token.balanceOf(recipient), initialBalance + amount);
-
-        vm.expectRevert(RainbowSuperToken.AlreadyClaimed.selector);
-        token.claim(proof, recipient, amount);
-        vm.stopPrank();
-
-        for (uint256 i = 1; i < 100; i++) {
-            proof = merkle.getProof(_data, i);
-
-            if (token.maxTotalMintedSupply() < token.totalSupply() + amount) {
-                vm.startPrank(vm.addr(i));
-                vm.expectRevert();
-                token.claim(proof, vm.addr(i), amount);
-
-                return;
-            }
-        }
-
-    } */
 
     function testCannotUseAFalseClaim() public {
         uint256 amount = 100e18;
