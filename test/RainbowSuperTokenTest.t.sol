@@ -37,7 +37,12 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
             telegramUrl: "https://t.me/test"
         });
 
-        token = new RainbowSuperToken("Test Token", "TEST", defaultMetadata, root, amount * 100);
+        uint256 id;
+        assembly {
+            id := chainid()
+        }
+
+        token = new RainbowSuperToken("Test Token", "TEST", defaultMetadata, root, amount * 100, id);
     }
 
     function testClaim() public {
