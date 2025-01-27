@@ -38,7 +38,7 @@ contract RainbowSuperToken is ERC20, Owned {
     uint256 public maxTotalMintedSupply;
 
     /// @dev Original Chain the token was deployed on
-    uint256 public immutable originalChainId;
+    uint256 public originalChainId;
 
     /// @param name The name of the token
     /// @param symbol The symbol of the token

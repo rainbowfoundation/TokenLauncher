@@ -509,8 +509,13 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     {
         bool hasAirdrop = merkleroot != bytes32(0);
         (,, uint256 airdropAmount) = calculateSupplyAllocation(supply, hasAirdrop);
+        
+        uint256 id;
+        assembly {
+            id := chainid()
+        }
 
-        bytes memory constructorArgs = abi.encode(name, symbol, metadata, merkleroot, airdropAmount);
+        bytes memory constructorArgs = abi.encode(name, symbol, metadata, merkleroot, airdropAmount, id);
         bytes32 createSalt = keccak256(abi.encode(creator, salt));
 
         token = address(
