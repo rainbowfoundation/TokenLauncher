@@ -42,13 +42,13 @@ contract RainbowSuperToken is ERC20, Owned {
 
     /// @param name The name of the token
     /// @param symbol The symbol of the token
-    /// @param _metadata The metadata for the token
+    /// @param _tokenURI A Url pointing to the metadata for the token
     /// @param _merkleRoot The merkle root to be used for claims
     /// @param _maxTotalMintedSupply The maximum total supply of the token that can be minted
     constructor(
         string memory name,
         string memory symbol,
-        RainbowTokenMetadata memory _metadata,
+        string memory _tokenURI,
         bytes32 _merkleRoot,
         uint256 _maxTotalMintedSupply,
         uint256 _originalChainId
@@ -56,7 +56,7 @@ contract RainbowSuperToken is ERC20, Owned {
         ERC20(name, symbol, 18)
         Owned(msg.sender)
     {
-        metadata = _metadata;
+        tokenURI = _tokenURI;
         merkleRoot = _merkleRoot;
         maxTotalMintedSupply = _maxTotalMintedSupply;
         originalChainId = _originalChainId;
@@ -123,46 +123,8 @@ contract RainbowSuperToken is ERC20, Owned {
                             RAINBOW METADATA
     //////////////////////////////////////////////////////////////*/
 
-    /// @custom:field tokenURI The URI for the token metadata.
-    /// @custom:field description A description of the token.
-    /// @custom:field farcasterProfileUrl The URL to the Farcaster profile.
-    /// @custom:field farcasterChannelUrl The URL to the Farcaster channel.
-    /// @custom:field telegramUrl The URL to the Telegram group.
-    struct RainbowTokenMetadata {
-        string tokenURI;
-        string description;
-        string farcasterProfileUrl;
-        string farcasterChannelUrl;
-        string telegramUrl;
-    }
-
-    RainbowTokenMetadata internal metadata;
-
-    /// @notice Returns the URI for the token metadata.
-    function tokenURI() public view returns (string memory) {
-        return metadata.tokenURI;
-    }
-
-    /// @notice Returns the description of the token.
-    function description() public view returns (string memory) {
-        return metadata.description;
-    }
-
-    /// @notice Returns the URL to the Farcaster profile.
-    function farcasterProfileUrl() public view returns (string memory) {
-        return metadata.farcasterProfileUrl;
-    }
-
-    /// @notice Returns the URL to the Farcaster channel.
-    function farcasterChannelUrl() public view returns (string memory) {
-        return metadata.farcasterChannelUrl;
-    }
-
-    /// @notice Returns the URL to the Telegram group.
-    /// @return url The URL to the Telegram group.
-    function telegramUrl() public view returns (string memory url) {
-        return metadata.telegramUrl;
-    }
+    /// @dev tokenURI The URI for the token metadata.
+    string public tokenURI;
 
     /*//////////////////////////////////////////////////////////////
                           SUPERCHAIN FUNCTIONS

@@ -27,9 +27,6 @@ contract BaseRainbowTest is Test {
     address public user1 = makeAddr("user1");
     address public user2 = makeAddr("user2");
 
-    // Test metadata
-    RainbowSuperToken.RainbowTokenMetadata public defaultMetadata;
-
     // Constants for testing
     uint256 constant INITIAL_SUPPLY = 10 ether;
     uint24 constant POOL_FEE = 10_000; // 1%

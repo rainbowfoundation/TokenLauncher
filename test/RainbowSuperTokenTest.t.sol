@@ -28,21 +28,12 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         }
         root = merkle.getRoot(_data);
 
-        // Set up default metadata for tests
-        defaultMetadata = RainbowSuperToken.RainbowTokenMetadata({
-            tokenURI: "ipfs://test",
-            description: "Test Token",
-            farcasterProfileUrl: "https://warpcast.com/test",
-            farcasterChannelUrl: "https://warpcast.com/~/channel/test",
-            telegramUrl: "https://t.me/test"
-        });
-
         uint256 id;
         assembly {
             id := chainid()
         }
 
-        token = new RainbowSuperToken("Test Token", "TEST", defaultMetadata, root, amount * 100, id);
+        token = new RainbowSuperToken("Test Token", "TEST", "https://rainbow.me/testMetadata", root, amount * 100, id);
     }
 
     function testClaim() public {
@@ -120,16 +111,16 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         assertEq(token.balanceOf(address(this)), initialBalance - amount);
     }
 
-    function testTokenMetaData() public view {
+    function testTokenMetaData() public {
+        uint256 amount = 100e18;
+        uint256 id;
         assertEq(token.name(), "Test Token");
         assertEq(token.symbol(), "TEST");
         assertEq(token.decimals(), 18);
 
-        assertEq(token.tokenURI(), "ipfs://test");
-        assertEq(token.description(), "Test Token");
-        assertEq(token.farcasterProfileUrl(), "https://warpcast.com/test");
-        assertEq(token.farcasterChannelUrl(), "https://warpcast.com/~/channel/test");
-        assertEq(token.telegramUrl(), "https://t.me/test");
+
+        token = new RainbowSuperToken("Test Token", "TEST", "https://rainbow.me/testMetadata", root, amount * 100, 1);
+        assertEq(token.tokenURI(), "https://rainbow.me/testMetadata");
     }
 
     function testTokenSupportsInterfaces() public view {

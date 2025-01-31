@@ -184,6 +184,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @param initialTick The initial tick for the liquidity position
     /// @param salt The salt for the token deployment
     /// @param deployer The address to grant the initial tokens to
+    /// @param tokenURI The URI for the token, points to all related metadata
     ///
     /// @return The newly created RainbowSuperToken
     function launchRainbowSuperTokenAndBuy(
@@ -194,7 +195,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         int24 initialTick,
         bytes32 salt,
         address deployer,
-        RainbowSuperToken.RainbowTokenMetadata memory metadata
+        string memory tokenURI
     )
         external
         payable
@@ -203,7 +204,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         if (msg.value == 0) revert InsufficientFunds();
         WETH.deposit{ value: msg.value }();
 
-        RainbowSuperToken token = launchRainbowSuperToken(name, symbol, merkleroot, supply, initialTick, salt, deployer, metadata);
+        RainbowSuperToken token = launchRainbowSuperToken(name, symbol, merkleroot, supply, initialTick, salt, deployer, tokenURI);
 
         ISwapRouter.ExactInputSingleParams memory swapParamsToken = ISwapRouter.ExactInputSingleParams({
             tokenIn: address(WETH), // The token we are exchanging from (ETH wrapped as WETH)
@@ -239,7 +240,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         int24 initialTick,
         bytes32 salt,
         address deployer,
-        RainbowSuperToken.RainbowTokenMetadata memory metadata
+        string memory tokenURI
     )
         public
         returns (RainbowSuperToken newToken)
@@ -264,7 +265,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         }
 
         // Create token
-        newToken = new RainbowSuperToken{ salt: keccak256(abi.encode(deployer, salt)) }(name, symbol, metadata, merkleroot, airdropAmount, id);
+        newToken = new RainbowSuperToken{ salt: keccak256(abi.encode(deployer, salt)) }(name, symbol, tokenURI, merkleroot, airdropAmount, id);
 
         if (address(newToken) > address(WETH)) {
             revert IncorrectSalt();
@@ -314,7 +315,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         emit RainbowSuperTokenCreated(address(newToken), deployer, msg.sender);
     }
 
-    /// @notice Launch a new RainbowSuperToken and buy initial tokens
+    /// @notice Launch a RainbowSuperToken at the same address as on the original chain
     /// @param name The name of the token
     /// @param symbol The symbol of the token
     /// @param merkleroot The merkle root for airdrop claims
@@ -330,7 +331,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         uint256 supply,
         bytes32 salt,
         address deployer,
-        RainbowSuperToken.RainbowTokenMetadata memory metadata,
+        string memory tokenURI,
         uint256 originalChainId
     )
         external
@@ -346,7 +347,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         bool hasAirdrop = merkleroot != bytes32(0);
         (,, uint256 airdropAmount) = calculateSupplyAllocation(supply, hasAirdrop);
 
-        newToken = new RainbowSuperToken{ salt: keccak256(abi.encode(deployer, salt)) }(name, symbol, metadata, merkleroot, airdropAmount, id);
+        newToken = new RainbowSuperToken{ salt: keccak256(abi.encode(deployer, salt)) }(name, symbol, tokenURI, merkleroot, airdropAmount, id);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -493,7 +494,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @param merkleroot The merkle root for airdrop claims
     /// @param supply The total supply of the token
     /// @param salt The salt for the token deployment
-    /// @param metadata The metadata for the token
+    /// @param tokenURI The URI for the token, points to all related metadata
     function predictTokenAddress(
         address creator,
         string memory name,
@@ -501,7 +502,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         bytes32 merkleroot,
         uint256 supply,
         bytes32 salt,
-        RainbowSuperToken.RainbowTokenMetadata memory metadata
+        string memory tokenURI
     )
         external
         view
@@ -509,13 +510,13 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     {
         bool hasAirdrop = merkleroot != bytes32(0);
         (,, uint256 airdropAmount) = calculateSupplyAllocation(supply, hasAirdrop);
-        
+
         uint256 id;
         assembly {
             id := chainid()
         }
 
-        bytes memory constructorArgs = abi.encode(name, symbol, metadata, merkleroot, airdropAmount, id);
+        bytes memory constructorArgs = abi.encode(name, symbol, tokenURI, merkleroot, airdropAmount, id);
         bytes32 createSalt = keccak256(abi.encode(creator, salt));
 
         token = address(
