@@ -117,6 +117,9 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @dev The Uniswap V3 SwapRouter contract
     ISwapRouter public immutable swapRouter;
 
+    /// @dev The base URI for all tokens
+    string public baseTokenURI;
+
     /// @dev The mapping of banned names
     mapping(string => bool) public bannedNames;
 
@@ -158,11 +161,25 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
                               CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
 
-    constructor(address _uniswapV3Factory, address _nonfungiblePositionManager, address _swapRouter, address _weth) Owned(msg.sender) {
+    /// @param _uniswapV3Factory The address of the Uniswap V3 factory contract
+    /// @param _nonfungiblePositionManager The address of the Uniswap V3 Nonfungible Position Manager contract
+    /// @param _swapRouter The address of the Uniswap V3 SwapRouter contract
+    /// @param _weth The address of the WETH contract
+    /// @param _baseTokenURI The base URI for all tokens
+    constructor(
+        address _uniswapV3Factory,
+        address _nonfungiblePositionManager,
+        address _swapRouter,
+        address _weth,
+        string memory _baseTokenURI
+    )
+        Owned(msg.sender)
+    {
         WETH = IWETH9(payable(_weth));
         swapRouter = ISwapRouter(_swapRouter);
         uniswapV3Factory = IUniswapV3Factory(_uniswapV3Factory);
         nonfungiblePositionManager = INonfungiblePositionManager(_nonfungiblePositionManager);
+        baseTokenURI = _baseTokenURI;
 
         WETH.approve(_swapRouter, type(uint256).max);
         defaultPairToken = ERC20(_weth);
@@ -171,6 +188,11 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /*//////////////////////////////////////////////////////////////
                              ADMIN CONTROLS
     //////////////////////////////////////////////////////////////*/
+
+    /// @notice Set the new base token URI
+    function setBaseTokenURI(string memory newBaseTokenURI) external onlyOwner {
+        baseTokenURI = newBaseTokenURI;
+    }
 
     /// @notice Set the new default pair token for all pairs
     /// @notice Only applies to new tokens
@@ -230,7 +252,6 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @param initialTick The initial tick for the liquidity position
     /// @param salt The salt for the token deployment
     /// @param creator The address to grant the initial tokens to
-    /// @param tokenURI The URI for the token, points to all related metadata
     ///
     /// @return The newly created RainbowSuperToken
     function launchRainbowSuperTokenAndBuy(
@@ -241,8 +262,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         int24 initialTick,
         bytes32 salt,
         address creator,
-        uint256 amountIn,
-        string memory tokenURI
+        uint256 amountIn
     )
         external
         payable
@@ -255,7 +275,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
             defaultPairToken.safeTransferFrom(msg.sender, address(this), amountIn);
         }
 
-        RainbowSuperToken token = launchRainbowSuperToken(name, symbol, merkleroot, supply, initialTick, salt, creator, tokenURI);
+        RainbowSuperToken token = launchRainbowSuperToken(name, symbol, merkleroot, supply, initialTick, salt, creator);
 
         ISwapRouter.ExactInputSingleParams memory swapParamsToken = ISwapRouter.ExactInputSingleParams({
             tokenIn: address(defaultPairToken), // The token we are exchanging from
@@ -290,8 +310,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         uint256 supply,
         int24 initialTick,
         bytes32 salt,
-        address creator,
-        string memory tokenURI
+        address creator
     )
         public
         returns (RainbowSuperToken newToken)
@@ -315,8 +334,12 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
             id := chainid()
         }
 
+        string memory tokenURI = string(abi.encode(keccak256(abi.encode(creator, salt, name, symbol, merkleroot, supply))));
+
         // Create token
-        newToken = new RainbowSuperToken{ salt: keccak256(abi.encode(creator, salt)) }(name, symbol, tokenURI, merkleroot, airdropAmount, id);
+        newToken = new RainbowSuperToken{ salt: keccak256(abi.encode(creator, salt)) }(
+            name, symbol, string.concat(baseTokenURI, tokenURI), merkleroot, airdropAmount, id
+        );
 
         address _pairToken = address(defaultPairToken);
 
@@ -553,15 +576,13 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @param merkleroot The merkle root for airdrop claims
     /// @param supply The total supply of the token
     /// @param salt The salt for the token deployment
-    /// @param tokenURI The URI for the token, points to all related metadata
     function predictTokenAddress(
         address creator,
         string memory name,
         string memory symbol,
         bytes32 merkleroot,
         uint256 supply,
-        bytes32 salt,
-        string memory tokenURI
+        bytes32 salt
     )
         external
         view
@@ -575,7 +596,9 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
             id := chainid()
         }
 
-        bytes memory constructorArgs = abi.encode(name, symbol, tokenURI, merkleroot, airdropAmount, id);
+        string memory tokenURI = string(abi.encode(keccak256(abi.encode(creator, salt, name, symbol, merkleroot, supply))));
+
+        bytes memory constructorArgs = abi.encode(name, symbol, string.concat(baseTokenURI, tokenURI), merkleroot, airdropAmount, id);
         bytes32 createSalt = keccak256(abi.encode(creator, salt));
 
         token = address(

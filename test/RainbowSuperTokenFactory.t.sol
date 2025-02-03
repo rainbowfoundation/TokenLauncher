@@ -19,8 +19,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         string memory name,
         string memory symbol,
         bytes32 merkleroot,
-        uint256 supply,
-        string memory tokenURI
+        uint256 supply
     )
         internal
         view
@@ -30,7 +29,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         bool foundValid = false;
 
         while (!foundValid) {
-            address predicted = rainbowFactory.predictTokenAddress(creator, name, symbol, merkleroot, supply, currentSalt, tokenURI);
+            address predicted = rainbowFactory.predictTokenAddress(creator, name, symbol, merkleroot, supply, currentSalt);
 
             if (predicted < address(rainbowFactory.defaultPairToken())) {
                 return (currentSalt, predicted);
@@ -43,14 +42,11 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
     function testPredictAddress() public {
         vm.startPrank(creator1);
 
-        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "TEST", bytes32(0), INITIAL_SUPPLY, "https://rainbow.me/testMetadata");
+        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "TEST", bytes32(0), INITIAL_SUPPLY);
 
-        address predicted =
-            rainbowFactory.predictTokenAddress(creator1, "Test Token", "TEST", bytes32(0), INITIAL_SUPPLY, salt, "https://rainbow.me/testMetadata");
+        address predicted = rainbowFactory.predictTokenAddress(creator1, "Test Token", "TEST", bytes32(0), INITIAL_SUPPLY, salt);
 
-        RainbowSuperToken token = rainbowFactory.launchRainbowSuperToken(
-            "Test Token", "TEST", bytes32(0), INITIAL_SUPPLY, 200, salt, address(creator1), "https://rainbow.me/testMetadata"
-        );
+        RainbowSuperToken token = rainbowFactory.launchRainbowSuperToken("Test Token", "TEST", bytes32(0), INITIAL_SUPPLY, 200, salt, address(creator1));
 
         assertEq(predicted, address(token));
     }
@@ -58,11 +54,9 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
     function testLaunchToken() public {
         vm.startPrank(creator1);
 
-        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "TEST", bytes32(0), INITIAL_SUPPLY, "https://rainbow.me/testMetadata");
+        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "TEST", bytes32(0), INITIAL_SUPPLY);
 
-        RainbowSuperToken token = rainbowFactory.launchRainbowSuperToken(
-            "Test Token", "TEST", bytes32(0), INITIAL_SUPPLY, 200, salt, address(creator1), "https://rainbow.me/testMetadata"
-        );
+        RainbowSuperToken token = rainbowFactory.launchRainbowSuperToken("Test Token", "TEST", bytes32(0), INITIAL_SUPPLY, 200, salt, address(creator1));
 
         assertTrue(address(token) < address(weth), "Token address must be less than WETH");
         assertEq(token.name(), "Test Token");
@@ -81,14 +75,12 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
     function testLaunchTokenWithAirdrop() public {
         vm.startPrank(creator1);
 
-        (bytes32 salt,) = findValidSalt(creator1, "Airdrop Token", "AIR", MERKLE_ROOT, INITIAL_SUPPLY, "https://rainbow.me/testMetadata");
+        (bytes32 salt,) = findValidSalt(creator1, "Airdrop Token", "AIR", MERKLE_ROOT, INITIAL_SUPPLY);
 
         vm.expectEmit(false, true, true, true);
         emit RainbowSuperTokenFactory.RainbowSuperTokenCreated(address(0), address(creator1), creator1);
 
-        RainbowSuperToken token = rainbowFactory.launchRainbowSuperToken(
-            "Airdrop Token", "AIR", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, address(creator1), "https://rainbow.me/testMetadata"
-        );
+        RainbowSuperToken token = rainbowFactory.launchRainbowSuperToken("Airdrop Token", "AIR", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, address(creator1));
 
         assertTrue(address(token) < address(weth), "Token address must be less than WETH");
         (,,,, bool hasAirdrop,, address creator) = rainbowFactory.tokenFeeConfig(address(token));
@@ -106,22 +98,20 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
     function testCannotLaunchReservedName() public {
         vm.startPrank(creator1);
 
-        (bytes32 salt,) = findValidSalt(creator1, "Rainbow", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, "https://rainbow.me/testMetadata");
+        (bytes32 salt,) = findValidSalt(creator1, "Rainbow", "TEST", MERKLE_ROOT, INITIAL_SUPPLY);
 
         vm.expectRevert(RainbowSuperTokenFactory.ReservedName.selector);
-        rainbowFactory.launchRainbowSuperToken("Rainbow", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, address(creator1), "https://rainbow.me/testMetadata");
+        rainbowFactory.launchRainbowSuperToken("Rainbow", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, address(creator1));
         vm.stopPrank();
     }
 
     function testCannotLaunchReservedTicker() public {
         vm.startPrank(creator1);
 
-        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "RNBW", MERKLE_ROOT, INITIAL_SUPPLY, "https://rainbow.me/testMetadata");
+        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "RNBW", MERKLE_ROOT, INITIAL_SUPPLY);
 
         vm.expectRevert(RainbowSuperTokenFactory.ReservedTicker.selector);
-        rainbowFactory.launchRainbowSuperToken(
-            "Test Token", "RNBW", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, address(creator1), "https://rainbow.me/testMetadata"
-        );
+        rainbowFactory.launchRainbowSuperToken("Test Token", "RNBW", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, address(creator1));
         vm.stopPrank();
     }
 
@@ -131,10 +121,10 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
 
         vm.startPrank(creator1);
 
-        (bytes32 salt,) = findValidSalt(creator1, "Banned", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, "https://rainbow.me/testMetadata");
+        (bytes32 salt,) = findValidSalt(creator1, "Banned", "TEST", MERKLE_ROOT, INITIAL_SUPPLY);
 
         vm.expectRevert(RainbowSuperTokenFactory.BannedName.selector);
-        rainbowFactory.launchRainbowSuperToken("Banned", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, address(creator1), "https://rainbow.me/testMetadata");
+        rainbowFactory.launchRainbowSuperToken("Banned", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, address(creator1));
         vm.stopPrank();
     }
 
@@ -144,12 +134,10 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
 
         vm.startPrank(creator1);
 
-        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "BAN", MERKLE_ROOT, INITIAL_SUPPLY, "https://rainbow.me/testMetadata");
+        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "BAN", MERKLE_ROOT, INITIAL_SUPPLY);
 
         vm.expectRevert(RainbowSuperTokenFactory.BannedTicker.selector);
-        rainbowFactory.launchRainbowSuperToken(
-            "Test Token", "BAN", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, address(creator1), "https://rainbow.me/testMetadata"
-        );
+        rainbowFactory.launchRainbowSuperToken("Test Token", "BAN", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, address(creator1));
         vm.stopPrank();
     }
 
@@ -171,11 +159,9 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         // Launch a token with new config
         vm.startPrank(creator1);
 
-        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, "https://rainbow.me/testMetadata");
+        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "TEST", MERKLE_ROOT, INITIAL_SUPPLY);
 
-        RainbowSuperToken token = rainbowFactory.launchRainbowSuperToken(
-            "Test Token", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, address(creator1), "https://rainbow.me/testMetadata"
-        );
+        RainbowSuperToken token = rainbowFactory.launchRainbowSuperToken("Test Token", "TEST", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, address(creator1));
 
         assertTrue(address(token) < address(weth), "Token address must be less than WETH");
         // Verify new config was applied
@@ -187,10 +173,9 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
     function testCannotUnauthorizedFeeClaim() public {
         vm.startPrank(creator1);
 
-        (bytes32 salt,) = findValidSalt(creator1, "Fee Token", "FEE", MERKLE_ROOT, INITIAL_SUPPLY, "https://rainbow.me/testMetadata");
+        (bytes32 salt,) = findValidSalt(creator1, "Fee Token", "FEE", MERKLE_ROOT, INITIAL_SUPPLY);
 
-        RainbowSuperToken token =
-            rainbowFactory.launchRainbowSuperToken("Fee Token", "FEE", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, creator1, "https://rainbow.me/testMetadata");
+        RainbowSuperToken token = rainbowFactory.launchRainbowSuperToken("Fee Token", "FEE", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, creator1);
 
         assertTrue(address(token) < address(weth), "Token address must be less than WETH");
         vm.stopPrank();
@@ -204,12 +189,12 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
     function testLaunchTokenWithBuy() public {
         vm.startPrank(creator1);
 
-        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "TEST", bytes32(0), INITIAL_SUPPLY, "https://rainbow.me/testMetadata");
+        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "TEST", bytes32(0), INITIAL_SUPPLY);
 
         vm.deal(creator1, 1 ether);
 
         RainbowSuperToken token = rainbowFactory.launchRainbowSuperTokenAndBuy{ value: 1 ether }(
-            "Test Token", "TEST", bytes32(0), INITIAL_SUPPLY, 200, salt, address(creator1), 1 ether, "https://rainbow.me/testMetadata"
+            "Test Token", "TEST", bytes32(0), INITIAL_SUPPLY, 200, salt, address(creator1), 1 ether
         );
 
         assertTrue(address(token) < address(weth), "Token address must be less than WETH");
@@ -229,11 +214,10 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
     function testCollectAndClaimFees() public {
         vm.startPrank(creator1);
 
-        (bytes32 salt,) = findValidSalt(creator1, "Fee Token", "FEE", MERKLE_ROOT, INITIAL_SUPPLY, "https://rainbow.me/testMetadata");
+        (bytes32 salt,) = findValidSalt(creator1, "Fee Token", "FEE", MERKLE_ROOT, INITIAL_SUPPLY);
 
         // Launch token
-        RainbowSuperToken token =
-            rainbowFactory.launchRainbowSuperToken("Fee Token", "FEE", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, creator1, "https://rainbow.me/testMetadata");
+        RainbowSuperToken token = rainbowFactory.launchRainbowSuperToken("Fee Token", "FEE", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, creator1);
 
         assertTrue(address(token) < address(weth), "Token address must be less than WETH");
 
@@ -366,7 +350,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         // Mint some USDC to creator1
         usdc.mint(creator1, 1000e18);
 
-        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "TEST", bytes32(0), INITIAL_SUPPLY, "https://rainbow.me/testMetadata");
+        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "TEST", bytes32(0), INITIAL_SUPPLY);
 
         // Approve USDC spend
         usdc.approve(address(rainbowFactory), 1000e18);
@@ -379,8 +363,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
             200,
             salt,
             address(creator1),
-            100e18, // Buy 100 USDC worth
-            "https://rainbow.me/testMetadata"
+            100e18 // Buy 100 USDC worth
         );
 
         assertTrue(address(token) < address(usdc), "Token address must be less than USDC");
@@ -407,11 +390,10 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
 
         vm.startPrank(creator1);
 
-        (bytes32 salt,) = findValidSalt(creator1, "Fee Token", "FEE", MERKLE_ROOT, INITIAL_SUPPLY, "https://rainbow.me/testMetadata");
+        (bytes32 salt,) = findValidSalt(creator1, "Fee Token", "FEE", MERKLE_ROOT, INITIAL_SUPPLY);
 
         // Launch token
-        RainbowSuperToken token =
-            rainbowFactory.launchRainbowSuperToken("Fee Token", "FEE", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, creator1, "https://rainbow.me/testMetadata");
+        RainbowSuperToken token = rainbowFactory.launchRainbowSuperToken("Fee Token", "FEE", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, creator1);
 
         assertTrue(address(token) < address(usdc), "Token address must be less than USDC");
 

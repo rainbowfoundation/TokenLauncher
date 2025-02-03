@@ -53,7 +53,8 @@ contract BaseRainbowTest is Test {
         );
 
         // Deploy Rainbow factory
-        rainbowFactory = new RainbowSuperTokenFactory(address(factory), address(nftPositionManager), address(swapRouter), address(weth));
+        rainbowFactory =
+            new RainbowSuperTokenFactory(address(factory), address(nftPositionManager), address(swapRouter), address(weth), "https://rainbow.me/tokens");
         vm.stopPrank();
     }
 }
