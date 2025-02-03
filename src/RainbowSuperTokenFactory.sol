@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 import { Owned } from "lib/solmate/src/auth/Owned.sol";
 import { ERC721TokenReceiver } from "solmate/tokens/ERC721.sol";
 import { ERC20 } from "lib/solmate/src/tokens/ERC20.sol";
+import { SafeTransferLib } from "lib/solmate/src/utils/SafeTransferLib.sol";
 
 import { RainbowSuperToken } from "src/RainbowSuperToken.sol";
 
@@ -22,6 +23,7 @@ import { INonfungiblePositionManager } from "vendor/v3-periphery/interfaces/INon
 /// @notice A factory contract for creating RainbowSuperTokens and managing their liquidity positions.
 contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     using TickMath for int24;
+    using SafeTransferLib for ERC20;
     using FixedPointMathLib for uint256;
 
     /*//////////////////////////////////////////////////////////////
@@ -45,10 +47,30 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
                                  EVENTS
     //////////////////////////////////////////////////////////////*/
 
+    /// @param token The address of the newly created token
+    /// @param owner The address of the creator of the token
+    /// @param creator The address of the creator of the token
     event RainbowSuperTokenCreated(address indexed token, address indexed owner, address indexed creator);
+
+    /// @param token The address of the token
+    /// @param config The new fee configuration
     event FeeConfigUpdated(address indexed token, FeeConfig config);
+
+    /// @param tokenId The ID of the NFT Position
+    /// @param creatorFee0 The amount of token0 fees for the creator
+    /// @param creatorFee1 The amount of token1 fees for the creator
+    /// @param protocolFee0 The amount of token0 fees for the protocol
+    /// @param protocolFee1 The amount of token1 fees for the protocol
     event FeesCollected(uint256 indexed tokenId, uint256 creatorFee0, uint256 creatorFee1, uint256 protocolFee0, uint256 protocolFee1);
+
+    /// @param recipient The address of the recipient
+    /// @param tokenId The ID of the NFT Position
+    /// @param amount0 The amount of token0 fees claimed
+    /// @param amount1 The amount of token1 fees claimed
     event FeesClaimed(address indexed recipient, uint256 indexed tokenId, uint256 amount0, uint256 amount1);
+
+    /// @param token The address of the new default pair token
+    event NewDefaultPairToken(address indexed token);
 
     /*//////////////////////////////////////////////////////////////
                               FEE CONFIG
@@ -65,6 +87,8 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         uint16 airdropBps;
         // Whether this token has airdrop enabled
         bool hasAirdrop;
+        // Fee Token
+        address feeToken;
         // Creator address for this token
         address creator;
     }
@@ -83,6 +107,9 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
 
     /// @dev The canonical WETH token contract
     IWETH9 public immutable WETH;
+
+    /// @dev The default pair token
+    ERC20 public defaultPairToken;
 
     /// @dev The Nonfungible Position Manager contract
     INonfungiblePositionManager public immutable nonfungiblePositionManager;
@@ -121,6 +148,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         creatorBaseBps: 46, // 0.46% to creator with airdrop
         airdropBps: 23, // 0.23% to airdrop
         hasAirdrop: false,
+        feeToken: address(WETH),
         creator: address(0)
     });
 
@@ -137,11 +165,22 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         nonfungiblePositionManager = INonfungiblePositionManager(_nonfungiblePositionManager);
 
         WETH.approve(_swapRouter, type(uint256).max);
+        defaultPairToken = ERC20(_weth);
     }
 
     /*//////////////////////////////////////////////////////////////
                              ADMIN CONTROLS
     //////////////////////////////////////////////////////////////*/
+
+    /// @notice Set the new default pair token for all pairs
+    /// @notice Only applies to new tokens
+    /// @param newPairToken The new pair token to set
+    function setNewPairToken(ERC20 newPairToken) public onlyOwner {
+        defaultPairToken = newPairToken;
+        defaultPairToken.approve(address(swapRouter), type(uint256).max);
+
+        emit NewDefaultPairToken(address(newPairToken));
+    }
 
     function setDefaultFeeConfig(FeeConfig calldata newConfig) external onlyOwner {
         if (newConfig.creatorLPFeeBps > 10_000) revert InvalidFeeSplit();
@@ -149,6 +188,13 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
             revert InvalidSupplyAllocation();
         }
         defaultFeeConfig = newConfig;
+
+        // We use address(0) as a default stand in
+        emit FeeConfigUpdated(address(0), newConfig);
+
+        if (newConfig.feeToken != address(defaultPairToken)) {
+            setNewPairToken(ERC20(newConfig.feeToken));
+        }
     }
 
     /// @notice Ban a name from being used
@@ -183,7 +229,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @param supply The total supply of the token
     /// @param initialTick The initial tick for the liquidity position
     /// @param salt The salt for the token deployment
-    /// @param deployer The address to grant the initial tokens to
+    /// @param creator The address to grant the initial tokens to
     /// @param tokenURI The URI for the token, points to all related metadata
     ///
     /// @return The newly created RainbowSuperToken
@@ -194,25 +240,30 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         uint256 supply,
         int24 initialTick,
         bytes32 salt,
-        address deployer,
+        address creator,
+        uint256 amountIn,
         string memory tokenURI
     )
         external
         payable
         returns (RainbowSuperToken)
     {
-        if (msg.value == 0) revert InsufficientFunds();
-        WETH.deposit{ value: msg.value }();
+        if (address(defaultPairToken) == address(WETH)) {
+            if (msg.value != amountIn) revert InsufficientFunds();
+            WETH.deposit{ value: msg.value }();
+        } else {
+            defaultPairToken.safeTransferFrom(msg.sender, address(this), amountIn);
+        }
 
-        RainbowSuperToken token = launchRainbowSuperToken(name, symbol, merkleroot, supply, initialTick, salt, deployer, tokenURI);
+        RainbowSuperToken token = launchRainbowSuperToken(name, symbol, merkleroot, supply, initialTick, salt, creator, tokenURI);
 
         ISwapRouter.ExactInputSingleParams memory swapParamsToken = ISwapRouter.ExactInputSingleParams({
-            tokenIn: address(WETH), // The token we are exchanging from (ETH wrapped as WETH)
+            tokenIn: address(defaultPairToken), // The token we are exchanging from
             tokenOut: address(token), // The token we are exchanging to
             fee: POOL_FEE, // The pool fee
-            recipient: deployer, // The recipient address
+            recipient: creator, // The recipient address
             deadline: block.timestamp, // The deadline for the swap
-            amountIn: msg.value, // The amount of ETH (WETH) to be swapped
+            amountIn: amountIn, // The amount of tokens to swap
             amountOutMinimum: 0, // Minimum amount to receive
             sqrtPriceLimitX96: 0 // No price limit
          });
@@ -229,7 +280,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @param supply The total supply of the token
     /// @param initialTick The initial tick for the liquidity position
     /// @param salt The salt for the token deployment
-    /// @param deployer The address to grant the initial tokens to
+    /// @param creator The address to grant the initial tokens to
     ///
     /// @return newToken The newly created RainbowSuperToken
     function launchRainbowSuperToken(
@@ -239,7 +290,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         uint256 supply,
         int24 initialTick,
         bytes32 salt,
-        address deployer,
+        address creator,
         string memory tokenURI
     )
         public
@@ -265,13 +316,15 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         }
 
         // Create token
-        newToken = new RainbowSuperToken{ salt: keccak256(abi.encode(deployer, salt)) }(name, symbol, tokenURI, merkleroot, airdropAmount, id);
+        newToken = new RainbowSuperToken{ salt: keccak256(abi.encode(creator, salt)) }(name, symbol, tokenURI, merkleroot, airdropAmount, id);
 
-        if (address(newToken) > address(WETH)) {
+        address _pairToken = address(defaultPairToken);
+
+        if (address(newToken) > address(_pairToken)) {
             revert IncorrectSalt();
         }
 
-        newToken.mint(deployer, creatorAmount);
+        newToken.mint(creator, creatorAmount);
 
         // Set up fee configuration
         FeeConfig memory config = FeeConfig({
@@ -280,11 +333,12 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
             creatorBaseBps: defaultFeeConfig.creatorBaseBps,
             airdropBps: defaultFeeConfig.airdropBps,
             hasAirdrop: hasAirdrop,
+            feeToken: address(defaultPairToken),
             creator: msg.sender
         });
         tokenFeeConfig[address(newToken)] = config;
 
-        IUniswapV3Pool pool = IUniswapV3Pool(uniswapV3Factory.createPool(address(newToken), address(WETH), POOL_FEE));
+        IUniswapV3Pool pool = IUniswapV3Pool(uniswapV3Factory.createPool(address(newToken), address(_pairToken), POOL_FEE));
 
         uint160 initialSqrtRatio = initialTick.getSqrtRatioAtTick();
         pool.initialize(initialSqrtRatio);
@@ -294,7 +348,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         // Provide initial liquidity
         INonfungiblePositionManager.MintParams memory params = INonfungiblePositionManager.MintParams({
             token0: address(newToken),
-            token1: address(WETH),
+            token1: address(_pairToken),
             fee: POOL_FEE,
             tickLower: initialTick,
             tickUpper: maxUsableTick(TICK_SPACING),
@@ -312,7 +366,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         // Store the position ID
         tokenPositionIds[address(newToken)] = tokenId;
 
-        emit RainbowSuperTokenCreated(address(newToken), deployer, msg.sender);
+        emit RainbowSuperTokenCreated(address(newToken), creator, msg.sender);
     }
 
     /// @notice Launch a RainbowSuperToken at the same address as on the original chain
@@ -321,7 +375,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @param merkleroot The merkle root for airdrop claims
     /// @param supply The total supply of the token
     /// @param salt The salt for the token deployment
-    /// @param deployer The address to grant the initial tokens to
+    /// @param creator The address to grant the initial tokens to
     ///
     /// @return newToken The newly created RainbowSuperToken
     function launchFromOtherChain(
@@ -330,7 +384,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         bytes32 merkleroot,
         uint256 supply,
         bytes32 salt,
-        address deployer,
+        address creator,
         string memory tokenURI,
         uint256 originalChainId
     )
@@ -347,7 +401,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         bool hasAirdrop = merkleroot != bytes32(0);
         (,, uint256 airdropAmount) = calculateSupplyAllocation(supply, hasAirdrop);
 
-        newToken = new RainbowSuperToken{ salt: keccak256(abi.encode(deployer, salt)) }(name, symbol, tokenURI, merkleroot, airdropAmount, id);
+        newToken = new RainbowSuperToken{ salt: keccak256(abi.encode(creator, salt)) }(name, symbol, tokenURI, merkleroot, airdropAmount, id);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -422,8 +476,10 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         // Reset unclaimed fees before transfer
         delete creatorUnclaimedFees[tokenId];
 
+        address feeToken = tokenFeeConfig[token].feeToken;
+
         // Get token addresses in correct order
-        (address token0, address token1) = address(token) < address(WETH) ? (token, address(WETH)) : (address(WETH), token);
+        (address token0, address token1) = address(token) < address(feeToken) ? (token, address(feeToken)) : (address(feeToken), token);
 
         // Transfer fees
         if (fees.unclaimed0 > 0) {
@@ -448,7 +504,10 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         delete protocolUnclaimedFees[tokenId];
 
         // Get token addresses in correct order
-        (address token0, address token1) = address(token) < address(WETH) ? (token, address(WETH)) : (address(WETH), token);
+        address feeToken = tokenFeeConfig[token].feeToken;
+
+        // Get token addresses in correct order
+        (address token0, address token1) = address(token) < address(feeToken) ? (token, address(feeToken)) : (address(feeToken), token);
 
         // Transfer fees
         if (fees.unclaimed0 > 0) {

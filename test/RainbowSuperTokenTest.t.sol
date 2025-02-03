@@ -113,11 +113,9 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
 
     function testTokenMetaData() public {
         uint256 amount = 100e18;
-        uint256 id;
         assertEq(token.name(), "Test Token");
         assertEq(token.symbol(), "TEST");
         assertEq(token.decimals(), 18);
-
 
         token = new RainbowSuperToken("Test Token", "TEST", "https://rainbow.me/testMetadata", root, amount * 100, 1);
         assertEq(token.tokenURI(), "https://rainbow.me/testMetadata");
