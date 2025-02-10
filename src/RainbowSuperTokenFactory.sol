@@ -419,13 +419,15 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         }
 
         if (originalChainId == id) revert Unauthorized();
+        if (msg.sender != creator) revert Unauthorized();
+
 
         bool hasAirdrop = merkleroot != bytes32(0);
         (,, uint256 airdropAmount) = calculateSupplyAllocation(supply, hasAirdrop);
 
         string memory tokenURI = string(abi.encode(keccak256(abi.encode(creator, salt, name, symbol, merkleroot, supply))));
 
-        newToken = new RainbowSuperToken{ salt: keccak256(abi.encode(creator, salt)) }(name, symbol, string.concat(baseTokenURI, tokenURI), merkleroot, airdropAmount, id);
+        newToken = new RainbowSuperToken{ salt: keccak256(abi.encode(creator, salt)) }(name, symbol, string.concat(baseTokenURI, tokenURI), merkleroot, airdropAmount, originalChainId);
     }
 
     /*//////////////////////////////////////////////////////////////
