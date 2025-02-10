@@ -415,6 +415,16 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         external
         returns (RainbowSuperToken newToken)
     {
+        // Name and ticker checks
+        if (keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("Rainbow"))) {
+            revert ReservedName();
+        }
+        if (keccak256(abi.encodePacked(symbol)) == keccak256(abi.encodePacked("RNBW"))) {
+            revert ReservedTicker();
+        }
+
+        if (bannedNames[name]) revert BannedName();
+        if (bannedTickers[symbol]) revert BannedTicker();
         uint256 id;
         assembly {
             id := chainid()
