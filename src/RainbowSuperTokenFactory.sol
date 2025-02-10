@@ -425,7 +425,9 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
 
         string memory tokenURI = string(abi.encode(keccak256(abi.encode(creator, salt, name, symbol, merkleroot, supply))));
 
-        newToken = new RainbowSuperToken{ salt: keccak256(abi.encode(creator, salt)) }(name, symbol, string.concat(baseTokenURI, tokenURI), merkleroot, airdropAmount, originalChainId);
+        newToken = new RainbowSuperToken{ salt: keccak256(abi.encode(creator, salt)) }(
+            name, symbol, string.concat(baseTokenURI, tokenURI), merkleroot, airdropAmount, originalChainId
+        );
     }
 
     /*//////////////////////////////////////////////////////////////

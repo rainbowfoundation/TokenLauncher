@@ -36,6 +36,7 @@ contract RainbowSuperToken is ERC20, Owned {
                               CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
     /// @dev The merkle root to be used for claims
+
     bytes32 public merkleRoot;
 
     /// @dev The maximum total supply of the token that can be minted
