@@ -272,6 +272,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
             if (msg.value != amountIn) revert InsufficientFunds();
             WETH.deposit{ value: msg.value }();
         } else {
+            if (msg.value != 0) revert InsufficientFunds(); // No ether should be sent if not WETH
             defaultPairToken.safeTransferFrom(msg.sender, address(this), amountIn);
         }
 
