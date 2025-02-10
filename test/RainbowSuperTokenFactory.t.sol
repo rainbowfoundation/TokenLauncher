@@ -106,7 +106,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         vm.chainId(2);
 
         vm.expectRevert(); // CreateCollision because we are not using a seperate fork
-        RainbowSuperToken token2 = rainbowFactory.launchFromOtherChain("Airdrop Token", "AIR", MERKLE_ROOT, INITIAL_SUPPLY, salt, creator1, 1);
+        RainbowSuperToken token2 = rainbowFactory.launchFromOtherChain("Airdrop Token", "AIR", MERKLE_ROOT, INITIAL_SUPPLY, salt, creator1, 1, 23000000000000000);
 
     }
 
