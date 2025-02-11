@@ -28,10 +28,15 @@ contract RainbowSuperToken is ERC20, Owned {
     /// @param sender   Address of the account that initiated the crosschain transfer.
     event CrosschainBurn(address indexed from, uint256 amount, address indexed sender);
 
+    /// @notice Emitted when tokens are claimed
+    /// @param to The address that claimed the tokens
+    /// @param amount The amount of tokens claimed
+    event Claim(address indexed to, uint256 amount);
     /*//////////////////////////////////////////////////////////////
                               CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
     /// @dev The merkle root to be used for claims
+
     bytes32 public merkleRoot;
 
     /// @dev The maximum total supply of the token that can be minted
@@ -111,6 +116,8 @@ contract RainbowSuperToken is ERC20, Owned {
         unchecked {
             balanceOf[recipient] += amount;
         }
+
+        emit Claim(recipient, amount);
     }
 
     /// @param recipient The address to mint the tokens to

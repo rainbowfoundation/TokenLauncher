@@ -272,6 +272,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
             if (msg.value != amountIn) revert InsufficientFunds();
             WETH.deposit{ value: msg.value }();
         } else {
+            if (msg.value != 0) revert InsufficientFunds(); // No ether should be sent if not WETH
             defaultPairToken.safeTransferFrom(msg.sender, address(this), amountIn);
         }
 
@@ -408,24 +409,35 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         uint256 supply,
         bytes32 salt,
         address creator,
-        uint256 originalChainId
+        uint256 originalChainId,
+        uint256 airdropAmount
     )
         external
         returns (RainbowSuperToken newToken)
     {
+        // Name and ticker checks
+        if (keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("Rainbow"))) {
+            revert ReservedName();
+        }
+        if (keccak256(abi.encodePacked(symbol)) == keccak256(abi.encodePacked("RNBW"))) {
+            revert ReservedTicker();
+        }
+
+        if (bannedNames[name]) revert BannedName();
+        if (bannedTickers[symbol]) revert BannedTicker();
         uint256 id;
         assembly {
             id := chainid()
         }
 
         if (originalChainId == id) revert Unauthorized();
-
-        bool hasAirdrop = merkleroot != bytes32(0);
-        (,, uint256 airdropAmount) = calculateSupplyAllocation(supply, hasAirdrop);
+        if (msg.sender != creator) revert Unauthorized();
 
         string memory tokenURI = string(abi.encode(keccak256(abi.encode(creator, salt, name, symbol, merkleroot, supply))));
 
-        newToken = new RainbowSuperToken{ salt: keccak256(abi.encode(creator, salt)) }(name, symbol, string.concat(baseTokenURI, tokenURI), merkleroot, airdropAmount, id);
+        newToken = new RainbowSuperToken{ salt: keccak256(abi.encode(creator, salt)) }(
+            name, symbol, string.concat(baseTokenURI, tokenURI), merkleroot, airdropAmount, originalChainId
+        );
     }
 
     /*//////////////////////////////////////////////////////////////

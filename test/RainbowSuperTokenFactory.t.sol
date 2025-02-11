@@ -95,6 +95,21 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         vm.stopPrank();
     }
 
+    function testLaunchFromOtherChain() public {
+        vm.startPrank(creator1);
+        (bytes32 salt,) = findValidSalt(creator1, "Airdrop Token", "AIR", MERKLE_ROOT, INITIAL_SUPPLY);
+
+        vm.chainId(1);
+
+        RainbowSuperToken token = rainbowFactory.launchRainbowSuperToken("Airdrop Token", "AIR", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, address(creator1));
+
+        vm.chainId(2);
+
+        vm.expectRevert(); // CreateCollision because we are not using a seperate fork
+        RainbowSuperToken token2 =
+            rainbowFactory.launchFromOtherChain("Airdrop Token", "AIR", MERKLE_ROOT, INITIAL_SUPPLY, salt, creator1, 1, 23_000_000_000_000_000);
+    }
+
     function testCannotLaunchReservedName() public {
         vm.startPrank(creator1);
 
