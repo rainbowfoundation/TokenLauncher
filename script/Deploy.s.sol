@@ -13,13 +13,7 @@ contract DeplyRainbow is Script {
         address uniswapV3Factory = vm.envAddress("UNISWAP_V3_FACTORY");
         address nonfungiblePositionManager = vm.envAddress("NONFUNGIBLE_POSITION_MANAGER");
         address swapRouter = vm.envAddress("SWAP_ROUTER");
-
-        address weth = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
-        if (block.chainid == 1) {
-            weth = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
-        } else {
-            weth = 0x4200000000000000000000000000000000000006;
-        }
+        address weth = vm.envAddress("WETH");
 
         console.log("Deploying RainbowSuperTokenFactory on chain ", block.chainid);
         RainbowSuperTokenFactory factory =

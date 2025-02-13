@@ -32,6 +32,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
 
     error ReservedName();
     error ReservedTicker();
+    error ZeroSupply();
     error BannedName();
     error BannedTicker();
     error NotUniswapPositionManager();
@@ -316,6 +317,8 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         public
         returns (RainbowSuperToken newToken)
     {
+        if (supply == 0) revert ZeroSupply();
+        
         // Name and ticker checks
         if (keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("Rainbow"))) {
             revert ReservedName();
@@ -415,6 +418,8 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         external
         returns (RainbowSuperToken newToken)
     {
+        if (supply == 0) revert ZeroSupply();
+        
         // Name and ticker checks
         if (keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("Rainbow"))) {
             revert ReservedName();
