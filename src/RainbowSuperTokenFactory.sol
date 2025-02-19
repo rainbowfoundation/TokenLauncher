@@ -51,7 +51,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @param token The address of the newly created token
     /// @param owner The address of the creator of the token
     /// @param creator The address of the creator of the token
-    event RainbowSuperTokenCreated(address indexed token, address indexed owner, address indexed creator);
+    event RainbowSuperTokenCreated(address indexed token, address indexed owner, address indexed creator, string uri);
 
     /// @param token The address of the token
     /// @param config The new fee configuration
@@ -318,7 +318,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         returns (RainbowSuperToken newToken)
     {
         if (supply == 0) revert ZeroSupply();
-        
+
         // Name and ticker checks
         if (keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("Rainbow"))) {
             revert ReservedName();
@@ -338,7 +338,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
             id := chainid()
         }
 
-        string memory tokenURI = string(abi.encode(keccak256(abi.encode(creator, salt, name, symbol, merkleroot, supply))));
+        string memory tokenURI = string(toHexString(keccak256(abi.encode(creator, salt, name, symbol, merkleroot, supply)), 32));
 
         // Create token
         newToken = new RainbowSuperToken{ salt: keccak256(abi.encode(creator, salt)) }(
@@ -393,7 +393,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         // Store the position ID
         tokenPositionIds[address(newToken)] = tokenId;
 
-        emit RainbowSuperTokenCreated(address(newToken), creator, msg.sender);
+        emit RainbowSuperTokenCreated(address(newToken), creator, msg.sender, tokenURI);
     }
 
     /// @notice Launch a RainbowSuperToken at the same address as on the original chain
@@ -419,7 +419,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         returns (RainbowSuperToken newToken)
     {
         if (supply == 0) revert ZeroSupply();
-        
+
         // Name and ticker checks
         if (keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("Rainbow"))) {
             revert ReservedName();
@@ -438,7 +438,8 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         if (originalChainId == id) revert Unauthorized();
         if (msg.sender != creator) revert Unauthorized();
 
-        string memory tokenURI = string(abi.encode(keccak256(abi.encode(creator, salt, name, symbol, merkleroot, supply))));
+        //string memory tokenURI = string(abi.encode(keccak256(abi.encode(creator, salt, name, symbol, merkleroot, supply))));
+        string memory tokenURI = string(toHexString(keccak256(abi.encode(creator, salt, name, symbol, merkleroot, supply)), 32));
 
         newToken = new RainbowSuperToken{ salt: keccak256(abi.encode(creator, salt)) }(
             name, symbol, string.concat(baseTokenURI, tokenURI), merkleroot, airdropAmount, originalChainId
@@ -587,6 +588,27 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
                                  UTILS
     //////////////////////////////////////////////////////////////*/
 
+    bytes16 private constant HEX_DIGITS = "0123456789abcdef";
+
+    error StringsInsufficientHexLength(bytes32 value, uint256 length);
+
+    /// @param value The value to convert to hex
+    /// @param length The length of the hex string
+    function toHexString(bytes32 value, uint256 length) internal pure returns (string memory) {
+        uint256 localValue = uint256(value);
+        bytes memory buffer = new bytes(2 * length + 2);
+        buffer[0] = "0";
+        buffer[1] = "x";
+        for (uint256 i = 2 * length + 1; i > 1; --i) {
+            buffer[i] = HEX_DIGITS[localValue & 0xf];
+            localValue >>= 4;
+        }
+        if (localValue != 0) {
+            revert StringsInsufficientHexLength(value, length);
+        }
+        return string(buffer);
+    }
+
     /// @notice Predict the address of a token, used to determine salt offchain
     /// @param creator The creator of the token (msg.sender)
     /// @param name The name of the token
@@ -614,7 +636,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
             id := chainid()
         }
 
-        string memory tokenURI = string(abi.encode(keccak256(abi.encode(creator, salt, name, symbol, merkleroot, supply))));
+        string memory tokenURI = string(toHexString(keccak256(abi.encode(creator, salt, name, symbol, merkleroot, supply)), 32));
 
         bytes memory constructorArgs = abi.encode(name, symbol, string.concat(baseTokenURI, tokenURI), merkleroot, airdropAmount, id);
         bytes32 createSalt = keccak256(abi.encode(creator, salt));

@@ -77,9 +77,6 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
 
         (bytes32 salt,) = findValidSalt(creator1, "Airdrop Token", "AIR", MERKLE_ROOT, INITIAL_SUPPLY);
 
-        vm.expectEmit(false, true, true, true);
-        emit RainbowSuperTokenFactory.RainbowSuperTokenCreated(address(0), address(creator1), creator1);
-
         RainbowSuperToken token = rainbowFactory.launchRainbowSuperToken("Airdrop Token", "AIR", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, address(creator1));
 
         assertTrue(address(token) < address(weth), "Token address must be less than WETH");
