@@ -68,10 +68,9 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         proof = merkle.getProof(_data, 106);
 
         initialBalance = token.balanceOf(user);
-        vm.prank(user);
+        vm.startPrank(user);
+        vm.expectRevert(RainbowSuperToken.CannotClaimZero.selector);
         token.claim(proof, user, amount);
-
-        assertEq(token.balanceOf(user), 0);
     }
 
     function testCannotUseAFalseClaim() public {

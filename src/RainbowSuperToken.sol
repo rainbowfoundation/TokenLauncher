@@ -81,7 +81,7 @@ contract RainbowSuperToken is ERC20, Owned {
     //////////////////////////////////////////////////////////////*/
 
     /// @dev Tracks the number of tokens we have minted in claims so far
-    uint256 totalMintedSupply;
+    uint256 public totalMintedSupply;
 
     /// @dev Tracks if a user has claimed their tokens
     mapping(address => bool) public claimed;
@@ -92,21 +92,28 @@ contract RainbowSuperToken is ERC20, Owned {
     /// @dev Error emitted when a user has already claimed their tokens
     error AlreadyClaimed();
 
+    /// @dev Error emitted when a user tries to claim 0 tokens
+    error CannotClaimZero();
+
     /// @param proof The merkle proof to verify the claim
     /// @param recipient The address to mint the tokens to
     /// @param amount The amount of tokens to mint
     function claim(bytes32[] calldata proof, address recipient, uint256 amount) external onlyOriginalChain {
-        if (claimed[msg.sender]) revert AlreadyClaimed();
+        if (claimed[recipient]) revert AlreadyClaimed();
 
-        claimed[msg.sender] = true;
+        claimed[recipient] = true;
 
-        bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(msg.sender, amount))));
+        bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(recipient, amount))));
         if (!MerkleProofLib.verifyCalldata(proof, merkleRoot, leaf)) {
             revert InvalidProof();
         }
 
         if (amount + totalMintedSupply > maxTotalMintedSupply) {
             amount = maxTotalMintedSupply - totalMintedSupply;
+        }
+
+        if (amount == 0) {
+            revert CannotClaimZero();
         }
 
         totalMintedSupply += amount;
