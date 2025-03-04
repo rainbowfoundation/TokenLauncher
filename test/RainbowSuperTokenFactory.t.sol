@@ -244,12 +244,11 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         weth.approve(address(swapRouter), type(uint256).max);
 
         // Perform swap WETH -> Token to generate fees
-        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
+        IV3SwapRouter.ExactInputSingleParams memory params = IV3SwapRouter.ExactInputSingleParams({
             tokenIn: address(weth),
             tokenOut: address(token),
             fee: POOL_FEE,
             recipient: user1,
-            deadline: block.timestamp + 300,
             amountIn: 10 ether,
             amountOutMinimum: 0,
             sqrtPriceLimitX96: 0
@@ -423,12 +422,11 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         usdc.approve(address(swapRouter), type(uint256).max);
 
         // Perform swap USDC -> Token to generate fees
-        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
+        IV3SwapRouter.ExactInputSingleParams memory params = IV3SwapRouter.ExactInputSingleParams({
             tokenIn: address(usdc),
             tokenOut: address(token),
             fee: POOL_FEE,
             recipient: user1,
-            deadline: block.timestamp + 300,
             amountIn: 100e18,
             amountOutMinimum: 0,
             sqrtPriceLimitX96: 0

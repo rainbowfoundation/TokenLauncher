@@ -11,7 +11,7 @@ import { RainbowSuperToken } from "src/RainbowSuperToken.sol";
 import { TickMath } from "vendor/v3-core/libraries/TickMath.sol";
 import { FixedPointMathLib } from "lib/solmate/src/utils/FixedPointMathLib.sol";
 
-import { ISwapRouter } from "vendor/v3-periphery/interfaces/ISwapRouter.sol";
+import { ISwapRouter02 } from "vendor/swap-router/interfaces/ISwapRouter02.sol";
 
 import { IWETH9 } from "vendor/v3-periphery/interfaces/external/IWETH9.sol";
 import { IUniswapV3Pool } from "vendor/v3-core/interfaces/IUniswapV3Pool.sol";
@@ -116,7 +116,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     INonfungiblePositionManager public immutable nonfungiblePositionManager;
 
     /// @dev The Uniswap V3 SwapRouter contract
-    ISwapRouter public immutable swapRouter;
+    ISwapRouter02 public immutable swapRouter;
 
     /// @dev The base URI for all tokens
     string public baseTokenURI;
@@ -177,7 +177,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         Owned(msg.sender)
     {
         WETH = IWETH9(payable(_weth));
-        swapRouter = ISwapRouter(_swapRouter);
+        swapRouter = ISwapRouter02(_swapRouter);
         uniswapV3Factory = IUniswapV3Factory(_uniswapV3Factory);
         nonfungiblePositionManager = INonfungiblePositionManager(_nonfungiblePositionManager);
         baseTokenURI = _baseTokenURI;
@@ -279,12 +279,11 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
 
         RainbowSuperToken token = launchRainbowSuperToken(name, symbol, merkleroot, supply, initialTick, salt, creator);
 
-        ISwapRouter.ExactInputSingleParams memory swapParamsToken = ISwapRouter.ExactInputSingleParams({
+        ISwapRouter02.ExactInputSingleParams memory swapParamsToken = ISwapRouter02.ExactInputSingleParams({
             tokenIn: address(defaultPairToken), // The token we are exchanging from
             tokenOut: address(token), // The token we are exchanging to
             fee: POOL_FEE, // The pool fee
             recipient: creator, // The recipient address
-            deadline: block.timestamp, // The deadline for the swap
             amountIn: amountIn, // The amount of tokens to swap
             amountOutMinimum: 0, // Minimum amount to receive
             sqrtPriceLimitX96: 0 // No price limit
