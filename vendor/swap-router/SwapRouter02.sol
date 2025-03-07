@@ -75,6 +75,36 @@ interface IImmutableState {
     function positionManager() external view returns (address);
 }
 
+// contracts/interfaces/IOracleSlippage.sol
+
+/// @title OracleSlippage interface
+/// @notice Enables slippage checks against oracle prices
+interface IOracleSlippage {
+    /// @notice Ensures that the current (synthetic) tick over the path is no worse than
+    /// `maximumTickDivergence` ticks away from the average as of `secondsAgo`
+    /// @param path The path to fetch prices over
+    /// @param maximumTickDivergence The maximum number of ticks that the price can degrade by
+    /// @param secondsAgo The number of seconds ago to compute oracle prices against
+    function checkOracleSlippage(
+        bytes memory path,
+        uint24 maximumTickDivergence,
+        uint32 secondsAgo
+    ) external view;
+
+    /// @notice Ensures that the weighted average current (synthetic) tick over the path is no
+    /// worse than `maximumTickDivergence` ticks away from the average as of `secondsAgo`
+    /// @param paths The paths to fetch prices over
+    /// @param amounts The weights for each entry in `paths`
+    /// @param maximumTickDivergence The maximum number of ticks that the price can degrade by
+    /// @param secondsAgo The number of seconds ago to compute oracle prices against
+    function checkOracleSlippage(
+        bytes[] memory paths,
+        uint128[] memory amounts,
+        uint24 maximumTickDivergence,
+        uint32 secondsAgo
+    ) external view;
+}
+
 // contracts/interfaces/IV2SwapRouter.sol
 
 /// @title Router token swapping functionality
@@ -613,6 +643,14 @@ interface IUniswapV3PoolEvents {
 
 // node_modules/@uniswap/v3-core/contracts/interfaces/pool/IUniswapV3PoolImmutables.sol
 
+interface IUniswapV3Factory {
+  function getPool(
+    address tokenA,
+    address tokenB,
+    uint24 fee
+  ) external view returns (address pool);
+}
+
 /// @title Pool state that never changes
 /// @notice These parameters are fixed for a pool forever, i.e., the methods will always return the same values
 interface IUniswapV3PoolImmutables {
@@ -791,63 +829,99 @@ interface IUniswapV3PoolState {
 /// @notice Facilitates multiplication and division that can have overflow of an intermediate value without any loss of precision
 /// @dev Handles "phantom overflow" i.e., allows multiplication and division where an intermediate value overflows 256 bits
 library FullMath {
-
-    function mulDiv(uint256 x, uint256 y, uint256 d) internal pure returns (uint256 z) {
-        /// @solidity memory-safe-assembly
-        assembly {
-            // 512-bit multiply `[p1 p0] = x * y`.
-            // Compute the product mod `2**256` and mod `2**256 - 1`
+    /// @notice Calculates floor(a×b÷denominator) with full precision. Throws if result overflows a uint256 or denominator == 0
+    /// @param a The multiplicand
+    /// @param b The multiplier
+    /// @param denominator The divisor
+    /// @return result The 256-bit result
+    /// @dev Credit to Remco Bloemen under MIT license https://xn--2-umb.com/21/muldiv
+    function mulDiv(uint256 a, uint256 b, uint256 denominator) internal pure returns (uint256 result) {
+        unchecked {
+            // 512-bit multiply [prod1 prod0] = a * b
+            // Compute the product mod 2**256 and mod 2**256 - 1
             // then use the Chinese Remainder Theorem to reconstruct
             // the 512 bit result. The result is stored in two 256
-            // variables such that `product = p1 * 2**256 + p0`.
-
-            // Temporarily use `z` as `p0` to save gas.
-            z := mul(x, y) // Lower 256 bits of `x * y`.
-            for {} 1 {} {
-                // If overflows.
-                if iszero(mul(or(iszero(x), eq(div(z, x), y)), d)) {
-                    let mm := mulmod(x, y, not(0))
-                    let p1 := sub(mm, add(z, lt(mm, z))) // Upper 256 bits of `x * y`.
-
-                    /*------------------- 512 by 256 division --------------------*/
-
-                    // Make division exact by subtracting the remainder from `[p1 p0]`.
-                    let r := mulmod(x, y, d) // Compute remainder using mulmod.
-                    let t := and(d, sub(0, d)) // The least significant bit of `d`. `t >= 1`.
-                    // Make sure `z` is less than `2**256`. Also prevents `d == 0`.
-                    // Placing the check here seems to give more optimal stack operations.
-                    if iszero(gt(d, p1)) {
-                        mstore(0x00, 0xae47f702) // `FullMulDivFailed()`.
-                        revert(0x1c, 0x04)
-                    }
-                    d := div(d, t) // Divide `d` by `t`, which is a power of two.
-                    // Invert `d mod 2**256`
-                    // Now that `d` is an odd number, it has an inverse
-                    // modulo `2**256` such that `d * inv = 1 mod 2**256`.
-                    // Compute the inverse by starting with a seed that is correct
-                    // correct for four bits. That is, `d * inv = 1 mod 2**4`.
-                    let inv := xor(2, mul(3, d))
-                    // Now use Newton-Raphson iteration to improve the precision.
-                    // Thanks to Hensel's lifting lemma, this also works in modular
-                    // arithmetic, doubling the correct bits in each step.
-                    inv := mul(inv, sub(2, mul(d, inv))) // inverse mod 2**8
-                    inv := mul(inv, sub(2, mul(d, inv))) // inverse mod 2**16
-                    inv := mul(inv, sub(2, mul(d, inv))) // inverse mod 2**32
-                    inv := mul(inv, sub(2, mul(d, inv))) // inverse mod 2**64
-                    inv := mul(inv, sub(2, mul(d, inv))) // inverse mod 2**128
-                    z :=
-                        mul(
-                            // Divide [p1 p0] by the factors of two.
-                            // Shift in bits from `p1` into `p0`. For this we need
-                            // to flip `t` such that it is `2**256 / t`.
-                            or(mul(sub(p1, gt(r, z)), add(div(sub(0, t), t), 1)), div(sub(z, r), t)),
-                            mul(sub(2, mul(d, inv)), inv) // inverse mod 2**256
-                        )
-                    break
-                }
-                z := div(z, d)
-                break
+            // variables such that product = prod1 * 2**256 + prod0
+            uint256 prod0 = a * b; // Least significant 256 bits of the product
+            uint256 prod1; // Most significant 256 bits of the product
+            assembly ("memory-safe") {
+                let mm := mulmod(a, b, not(0))
+                prod1 := sub(sub(mm, prod0), lt(mm, prod0))
             }
+
+            // Make sure the result is less than 2**256.
+            // Also prevents denominator == 0
+            require(denominator > prod1);
+
+            // Handle non-overflow cases, 256 by 256 division
+            if (prod1 == 0) {
+                assembly ("memory-safe") {
+                    result := div(prod0, denominator)
+                }
+                return result;
+            }
+
+            ///////////////////////////////////////////////
+            // 512 by 256 division.
+            ///////////////////////////////////////////////
+
+            // Make division exact by subtracting the remainder from [prod1 prod0]
+            // Compute remainder using mulmod
+            uint256 remainder;
+            assembly ("memory-safe") {
+                remainder := mulmod(a, b, denominator)
+            }
+            // Subtract 256 bit number from 512 bit number
+            assembly ("memory-safe") {
+                prod1 := sub(prod1, gt(remainder, prod0))
+                prod0 := sub(prod0, remainder)
+            }
+
+            // Factor powers of two out of denominator
+            // Compute largest power of two divisor of denominator.
+            // Always >= 1.
+            uint256 twos = (0 - denominator) & denominator;
+            // Divide denominator by power of two
+            assembly ("memory-safe") {
+                denominator := div(denominator, twos)
+            }
+
+            // Divide [prod1 prod0] by the factors of two
+            assembly ("memory-safe") {
+                prod0 := div(prod0, twos)
+            }
+            // Shift in bits from prod1 into prod0. For this we need
+            // to flip `twos` such that it is 2**256 / twos.
+            // If twos is zero, then it becomes one
+            assembly ("memory-safe") {
+                twos := add(div(sub(0, twos), twos), 1)
+            }
+            prod0 |= prod1 * twos;
+
+            // Invert denominator mod 2**256
+            // Now that denominator is an odd number, it has an inverse
+            // modulo 2**256 such that denominator * inv = 1 mod 2**256.
+            // Compute the inverse by starting with a seed that is correct
+            // correct for four bits. That is, denominator * inv = 1 mod 2**4
+            uint256 inv = (3 * denominator) ^ 2;
+            // Now use Newton-Raphson iteration to improve the precision.
+            // Thanks to Hensel's lifting lemma, this also works in modular
+            // arithmetic, doubling the correct bits in each step.
+            inv *= 2 - denominator * inv; // inverse mod 2**8
+            inv *= 2 - denominator * inv; // inverse mod 2**16
+            inv *= 2 - denominator * inv; // inverse mod 2**32
+            inv *= 2 - denominator * inv; // inverse mod 2**64
+            inv *= 2 - denominator * inv; // inverse mod 2**128
+            inv *= 2 - denominator * inv; // inverse mod 2**256
+
+            // Because the division is now exact we can divide by multiplying
+            // with the modular inverse of denominator. This will give us the
+            // correct result modulo 2**256. Since the preconditions guarantee
+            // that the outcome is less than 2**256, this is the final result.
+            // We don't need to compute the high bits of the result and prod1
+            // is no longer required.
+            result = prod0 * inv;
+            return result;
         }
     }
 
@@ -1471,8 +1545,8 @@ library PoolAddress {
     /// @return pool The contract address of the V3 pool
     function computeAddress(address factory, PoolKey memory key) internal pure returns (address pool) {
         require(key.token0 < key.token1);
-        pool = address(bytes20(bytes32(
-            uint256(
+        pool = address(
+            bytes20(bytes32(uint256(
                 keccak256(
                     abi.encodePacked(
                         hex'ff',
@@ -1480,8 +1554,8 @@ library PoolAddress {
                         keccak256(abi.encode(key.token0, key.token1, key.fee)),
                         POOL_INIT_CODE_HASH
                     )
-        )))
-            )
+                ))
+            ))
         );
     }
 }
@@ -1985,8 +2059,8 @@ library UniswapV2Library {
         address tokenB
     ) internal pure returns (address pair) {
         (address token0, address token1) = sortTokens(tokenA, tokenB);
-        pair = address(bytes20(bytes32(
-            uint256(
+        pair = address(
+            bytes20(bytes32(uint256(
                 keccak256(
                     abi.encodePacked(
                         hex'ff',
@@ -2629,9 +2703,9 @@ library OracleLibrary {
         uint160 secondsPerLiquidityCumulativesDelta =
             secondsPerLiquidityCumulativeX128s[1] - secondsPerLiquidityCumulativeX128s[0];
 
-        arithmeticMeanTick = int24(tickCumulativesDelta / int32(secondsAgo));
+        arithmeticMeanTick = int24(int256(tickCumulativesDelta) / int256(uint256(secondsAgo)));
         // Always round to negative infinity
-        if (tickCumulativesDelta < 0 && (tickCumulativesDelta % int32(secondsAgo) != 0)) arithmeticMeanTick--;
+        if (tickCumulativesDelta < 0 && (uint256(int256(tickCumulativesDelta)) % uint256(secondsAgo) != 0)) arithmeticMeanTick--;
 
         // We are multiplying here instead of shifting to ensure that harmonicMeanLiquidity doesn't overflow uint128
         uint192 secondsAgoX160 = uint192(secondsAgo) * type(uint160).max;
@@ -2714,7 +2788,7 @@ library OracleLibrary {
         require(prevInitialized, 'ONI');
 
         uint32 delta = observationTimestamp - prevObservationTimestamp;
-        tick = int24((tickCumulative - prevTickCumulative) / int32(delta));
+        tick = int24(int256((tickCumulative - prevTickCumulative)) / int256(uint256(delta)));
         uint128 liquidity =
             uint128(
                 (uint192(delta) * type(uint160).max) /
@@ -2923,6 +2997,167 @@ abstract contract ApproveAndCall is IApproveAndCall, ImmutableState {
     }
 }
 
+// contracts/base/OracleSlippage.sol
+
+abstract contract OracleSlippage is IOracleSlippage, PeripheryImmutableState, BlockTimestamp {
+    using Path for bytes;
+
+    /// @dev Returns the tick as of the beginning of the current block, and as of right now, for the given pool.
+    function getBlockStartingAndCurrentTick(IUniswapV3Pool pool)
+        internal
+        view
+        returns (int24 blockStartingTick, int24 currentTick)
+    {
+        uint16 observationIndex;
+        uint16 observationCardinality;
+        (, currentTick, observationIndex, observationCardinality, , , ) = pool.slot0();
+
+        // 2 observations are needed to reliably calculate the block starting tick
+        require(observationCardinality > 1, 'NEO');
+
+        // If the latest observation occurred in the past, then no tick-changing trades have happened in this block
+        // therefore the tick in `slot0` is the same as at the beginning of the current block.
+        // We don't need to check if this observation is initialized - it is guaranteed to be.
+        (uint32 observationTimestamp, int56 tickCumulative, , ) = pool.observations(observationIndex);
+        if (observationTimestamp != uint32(_blockTimestamp())) {
+            blockStartingTick = currentTick;
+        } else {
+            uint256 prevIndex = (uint256(observationIndex) + observationCardinality - 1) % observationCardinality;
+            (uint32 prevObservationTimestamp, int56 prevTickCumulative, , bool prevInitialized) =
+                pool.observations(prevIndex);
+
+            require(prevInitialized, 'ONI');
+
+            uint32 delta = observationTimestamp - prevObservationTimestamp;
+            blockStartingTick = int24(int256((tickCumulative - prevTickCumulative)) / int256(uint256(delta)));
+        }
+    }
+
+    /// @dev Virtual function to get pool addresses that can be overridden in tests.
+    function getPoolAddress(
+        address tokenA,
+        address tokenB,
+        uint24 fee
+    ) internal view virtual returns (IUniswapV3Pool pool) {
+        pool = IUniswapV3Pool(PoolAddress.computeAddress(factory, PoolAddress.getPoolKey(tokenA, tokenB, fee)));
+    }
+
+    /// @dev Returns the synthetic time-weighted average tick as of secondsAgo, as well as the current tick,
+    /// for the given path. Returned synthetic ticks always represent tokenOut/tokenIn prices,
+    /// meaning lower ticks are worse.
+    function getSyntheticTicks(bytes memory path, uint32 secondsAgo)
+        internal
+        view
+        returns (int256 syntheticAverageTick, int256 syntheticCurrentTick)
+    {
+        bool lowerTicksAreWorse;
+
+        uint256 numPools = path.numPools();
+        address previousTokenIn;
+        for (uint256 i = 0; i < numPools; i++) {
+            // this assumes the path is sorted in swap order
+            (address tokenIn, address tokenOut, uint24 fee) = path.decodeFirstPool();
+            IUniswapV3Pool pool = getPoolAddress(tokenIn, tokenOut, fee);
+
+            // get the average and current ticks for the current pool
+            int256 averageTick;
+            int256 currentTick;
+            if (secondsAgo == 0) {
+                // we optimize for the secondsAgo == 0 case, i.e. since the beginning of the block
+                (averageTick, currentTick) = getBlockStartingAndCurrentTick(pool);
+            } else {
+                (averageTick, ) = OracleLibrary.consult(address(pool), secondsAgo);
+                (, currentTick, , , , , ) = IUniswapV3Pool(pool).slot0();
+            }
+
+            if (i == numPools - 1) {
+                // if we're here, this is the last pool in the path, meaning tokenOut represents the
+                // destination token. so, if tokenIn < tokenOut, then tokenIn is token0 of the last pool,
+                // meaning the current running ticks are going to represent tokenOut/tokenIn prices.
+                // so, the lower these prices get, the worse of a price the swap will get
+                lowerTicksAreWorse = tokenIn < tokenOut;
+            } else {
+                // if we're here, we need to iterate over the next pool in the path
+                path = path.skipToken();
+                previousTokenIn = tokenIn;
+            }
+
+            // accumulate the ticks derived from the current pool into the running synthetic ticks,
+            // ensuring that intermediate tokens "cancel out"
+            bool add = (i == 0) || (previousTokenIn < tokenIn ? tokenIn < tokenOut : tokenOut < tokenIn);
+            if (add) {
+                syntheticAverageTick += averageTick;
+                syntheticCurrentTick += currentTick;
+            } else {
+                syntheticAverageTick -= averageTick;
+                syntheticCurrentTick -= currentTick;
+            }
+        }
+
+        // flip the sign of the ticks if necessary, to ensure that the lower ticks are always worse
+        if (!lowerTicksAreWorse) {
+            syntheticAverageTick *= -1;
+            syntheticCurrentTick *= -1;
+        }
+    }
+
+    /// @dev Cast a int256 to a int24, revert on overflow or underflow
+    function toInt24(int256 y) private pure returns (int24 z) {
+        require((z = int24(y)) == y);
+    }
+
+    /// @dev For each passed path, fetches the synthetic time-weighted average tick as of secondsAgo,
+    /// as well as the current tick. Then, synthetic ticks from all paths are subjected to a weighted
+    /// average, where the weights are the fraction of the total input amount allocated to each path.
+    /// Returned synthetic ticks always represent tokenOut/tokenIn prices, meaning lower ticks are worse.
+    /// Paths must all start and end in the same token.
+    function getSyntheticTicks(
+        bytes[] memory paths,
+        uint128[] memory amounts,
+        uint32 secondsAgo
+    ) internal view returns (int256 averageSyntheticAverageTick, int256 averageSyntheticCurrentTick) {
+        require(paths.length == amounts.length);
+
+        OracleLibrary.WeightedTickData[] memory weightedSyntheticAverageTicks =
+            new OracleLibrary.WeightedTickData[](paths.length);
+        OracleLibrary.WeightedTickData[] memory weightedSyntheticCurrentTicks =
+            new OracleLibrary.WeightedTickData[](paths.length);
+
+        for (uint256 i = 0; i < paths.length; i++) {
+            (int256 syntheticAverageTick, int256 syntheticCurrentTick) = getSyntheticTicks(paths[i], secondsAgo);
+            weightedSyntheticAverageTicks[i].tick = toInt24(syntheticAverageTick);
+            weightedSyntheticCurrentTicks[i].tick = toInt24(syntheticCurrentTick);
+            weightedSyntheticAverageTicks[i].weight = amounts[i];
+            weightedSyntheticCurrentTicks[i].weight = amounts[i];
+        }
+
+        averageSyntheticAverageTick = OracleLibrary.getWeightedArithmeticMeanTick(weightedSyntheticAverageTicks);
+        averageSyntheticCurrentTick = OracleLibrary.getWeightedArithmeticMeanTick(weightedSyntheticCurrentTicks);
+    }
+
+    /// @inheritdoc IOracleSlippage
+    function checkOracleSlippage(
+        bytes memory path,
+        uint24 maximumTickDivergence,
+        uint32 secondsAgo
+    ) external view override {
+        (int256 syntheticAverageTick, int256 syntheticCurrentTick) = getSyntheticTicks(path, secondsAgo);
+        require(syntheticAverageTick - syntheticCurrentTick < int256(uint256(maximumTickDivergence)), 'TD');
+    }
+
+    /// @inheritdoc IOracleSlippage
+    function checkOracleSlippage(
+        bytes[] memory paths,
+        uint128[] memory amounts,
+        uint24 maximumTickDivergence,
+        uint32 secondsAgo
+    ) external view override {
+        (int256 averageSyntheticAverageTick, int256 averageSyntheticCurrentTick) =
+            getSyntheticTicks(paths, amounts, secondsAgo);
+        require(averageSyntheticAverageTick - averageSyntheticCurrentTick < int256(uint256(maximumTickDivergence)), 'TD');
+    }
+}
+
 // contracts/V2SwapRouter.sol
 
 /// @title Uniswap V2 Swap Router
@@ -3011,7 +3246,7 @@ abstract contract V2SwapRouter is IV2SwapRouter, ImmutableState, PeripheryPaymen
 
 /// @title Uniswap V3 Swap Router
 /// @notice Router for stateless execution of swaps against Uniswap V3
-abstract contract V3SwapRouter is IV3SwapRouter, PeripheryPaymentsWithFeeExtended {
+abstract contract V3SwapRouter is IV3SwapRouter, PeripheryPaymentsWithFeeExtended, OracleSlippage {
     using Path for bytes;
     using SafeCast for uint256;
 
@@ -3028,7 +3263,7 @@ abstract contract V3SwapRouter is IV3SwapRouter, PeripheryPaymentsWithFeeExtende
         address tokenB,
         uint24 fee
     ) private view returns (IUniswapV3Pool) {
-        return IUniswapV3Pool(PoolAddress.computeAddress(factory, PoolAddress.getPoolKey(tokenA, tokenB, fee)));
+        return IUniswapV3Pool(IUniswapV3Factory(factory).getPool(tokenA, tokenB, fee));
     }
 
     struct SwapCallbackData {
@@ -3042,10 +3277,10 @@ abstract contract V3SwapRouter is IV3SwapRouter, PeripheryPaymentsWithFeeExtende
         int256 amount1Delta,
         bytes calldata _data
     ) external override {
-        require(amount0Delta > 0 || amount1Delta > 0, "issue here"); // swaps entirely within 0-liquidity regions are not supported
+        require(amount0Delta > 0 || amount1Delta > 0); // swaps entirely within 0-liquidity regions are not supported
         SwapCallbackData memory data = abi.decode(_data, (SwapCallbackData));
         (address tokenIn, address tokenOut, uint24 fee) = data.path.decodeFirstPool();
-        //CallbackValidation.verifyCallback(factory, tokenIn, tokenOut, fee);
+        // CallbackValidation.verifyCallback(factory, tokenIn, tokenOut, fee);
 
         (bool isExactInput, uint256 amountToPay) =
             amount0Delta > 0

@@ -6,7 +6,7 @@ import { console } from "forge-std/console.sol";
 import { ISwapRouter } from "vendor/v3-periphery/interfaces/ISwapRouter.sol";
 import { ISwapRouter02 } from "vendor/swap-router/interfaces/ISwapRouter02.sol";
 import { Test } from "forge-std/Test.sol";
-import { SwapRouter02, IV3SwapRouter } from "vendor/swap-router/SwapRouter02Flat.sol";
+import { SwapRouter02, IV3SwapRouter } from "vendor/swap-router/SwapRouter02.sol";
 import { SwapRouter } from "vendor/v3-periphery/SwapRouter.sol";
 import { NonfungiblePositionManager } from "vendor/v3-periphery/NonfungiblePositionManager.sol";
 import { UniswapV3Factory } from "vendor/v3-core/UniswapV3Factory.sol";
@@ -51,7 +51,7 @@ contract BaseRainbowTest is Test {
             address(weth),
             address(0) // No descriptor needed for testing
         );
-        
+
         swapRouter = new SwapRouter02(address(0), address(factory), address(nftPositionManager), address(weth));
 
         // Deploy Rainbow factory

@@ -45,41 +45,36 @@ contract ForkRainbowTest is Test {
         swapRouter = ISwapRouter(UNISWAP_SWAP_ROUTER);
         nftPositionManager = INonfungiblePositionManager(UNISWAP_POSITION_MANAGER);
         weth = IWETH9(WETH_ADDRESS);
-        
+
         // Verify the tick spacing for our pool fee is as expected
-        assertEq(factory.feeAmountTickSpacing(10000), 200, "Tick spacing should be 200 for 1% fee");
-        
+        assertEq(factory.feeAmountTickSpacing(10_000), 200, "Tick spacing should be 200 for 1% fee");
+
         // Fund accounts
         vm.deal(creator, 10 ether);
         vm.deal(user, 10 ether);
         vm.deal(owner, 10 ether);
-        
+
         // Deploy Rainbow factory
         vm.startPrank(owner);
-        rainbowFactory = new RainbowSuperTokenFactory(
-            UNISWAP_V3_FACTORY,
-            UNISWAP_POSITION_MANAGER,
-            UNISWAP_SWAP_ROUTER,
-            WETH_ADDRESS,
-            "https://rainbow.me/tokens/"
-        );
+        rainbowFactory =
+            new RainbowSuperTokenFactory(UNISWAP_V3_FACTORY, UNISWAP_POSITION_MANAGER, UNISWAP_SWAP_ROUTER, WETH_ADDRESS, "https://rainbow.me/tokens/");
         vm.stopPrank();
     }
-    
+
     function testLaunchAndBuyToken() public {
         // Get initial balances
         uint256 creatorEthBefore = creator.balance;
-        
+
         // Launch a new token as creator
         vm.startPrank(creator);
-        
+
         // Create a deterministic salt for testing
         // We need to find a salt that produces a token address
         // that is lexicographically less than WETH address
         bytes32 salt;
         address predictedTokenAddress;
         uint256 counter = 0;
-        
+
         do {
             salt = keccak256(abi.encodePacked(block.timestamp, creator, counter));
             predictedTokenAddress = rainbowFactory.predictTokenAddress(
@@ -92,37 +87,30 @@ contract ForkRainbowTest is Test {
             );
             counter++;
         } while (predictedTokenAddress > WETH_ADDRESS);
-        
+
         console.log("Found valid salt after", counter, "attempts");
         console.log("Predicted token address:", predictedTokenAddress);
-        
+
         // No merkle root for this test
         bytes32 merkleRoot = bytes32(0);
-        
+
         // Launch and buy in one transaction
-        RainbowSuperToken newToken = rainbowFactory.launchRainbowSuperTokenAndBuy{value: BUY_AMOUNT}(
-            "TestToken",
-            "TEST",
-            merkleRoot,
-            INITIAL_SUPPLY,
-            INITIAL_TICK,
-            salt,
-            creator,
-            BUY_AMOUNT
+        RainbowSuperToken newToken = rainbowFactory.launchRainbowSuperTokenAndBuy{ value: BUY_AMOUNT }(
+            "TestToken", "TEST", merkleRoot, INITIAL_SUPPLY, INITIAL_TICK, salt, creator, BUY_AMOUNT
         );
-        
+
         // Verify the deployed address matches prediction
         assertEq(address(newToken), predictedTokenAddress, "Deployed address should match prediction");
-        
+
         vm.stopPrank();
-        
+
         // Verify token creation
         assertEq(newToken.name(), "TestToken");
         assertEq(newToken.symbol(), "TEST");
-        
+
         // Verify creator spent ETH
         assertEq(creator.balance, creatorEthBefore - BUY_AMOUNT, "Creator should have spent ETH");
-        
+
         // Verify creator received tokens
         uint256 creatorBalance = newToken.balanceOf(creator);
         assertTrue(creatorBalance > 0, "Creator should have tokens after buying");
