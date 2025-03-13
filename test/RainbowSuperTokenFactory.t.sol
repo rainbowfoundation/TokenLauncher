@@ -104,7 +104,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
 
         vm.expectRevert(); // CreateCollision because we are not using a seperate fork
         RainbowSuperToken token2 =
-            rainbowFactory.launchFromOtherChain("Airdrop Token", "AIR", MERKLE_ROOT, INITIAL_SUPPLY, salt, creator1, 1, 23_000_000_000_000_000);
+            rainbowFactory.launchFromOtherChain("Airdrop Token", "AIR", MERKLE_ROOT, INITIAL_SUPPLY, salt, creator1, 1, 50_000_000_000_000_000);
     }
 
     function testCannotLaunchReservedName() public {
@@ -468,6 +468,114 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         uint256 ownerToken1After = usdc.balanceOf(owner);
 
         assertTrue(ownerToken0After > ownerToken0Before || ownerToken1After > ownerToken1Before, "Owner did not receive fees");
+        vm.stopPrank();
+    }
+
+    function testUpdatedSupplyAllocationLogic() public {
+        vm.startPrank(owner);
+
+        // Get default fee config values
+        (, uint16 protocolBaseBps, uint16 creatorBaseBps, uint16 airdropBps,,,) = rainbowFactory.defaultFeeConfig();
+
+        // Set a specific protocol owner address to test allocations
+        address protocolOwner = address(0xDEAD);
+
+        vm.stopPrank();
+
+        // Test token without airdrop - creator should get both creator and airdrop allocations
+        vm.startPrank(creator1);
+
+        (bytes32 salt,) = findValidSalt(creator1, "No Airdrop Updated", "NAIR", bytes32(0), INITIAL_SUPPLY);
+        RainbowSuperToken tokenNoAirdrop = rainbowFactory.launchRainbowSuperToken(
+            "No Airdrop Updated",
+            "NAIR",
+            bytes32(0), // No merkleroot means no airdrop
+            INITIAL_SUPPLY,
+            200,
+            salt,
+            address(creator1)
+        );
+
+        // Calculate expected allocations without airdrop
+        // When no airdrop, creator should get their base allocation PLUS the airdrop allocation
+        uint256 expectedCreatorAmount = (INITIAL_SUPPLY * creatorBaseBps) / 10_000 + (INITIAL_SUPPLY * airdropBps) / 10_000;
+        uint256 expectedProtocolAmount = (INITIAL_SUPPLY * protocolBaseBps) / 10_000;
+
+        // Check creator allocation includes both creator and airdrop portions
+        assertEq(tokenNoAirdrop.balanceOf(creator1), expectedCreatorAmount, "Creator should receive both creator and airdrop allocations when no airdrop");
+
+        // Check protocol allocation
+        uint256 tokenId = rainbowFactory.tokenPositionIds(address(tokenNoAirdrop));
+        (uint128 protocolUnclaimed0, uint128 protocolUnclaimed1) = rainbowFactory.protocolUnclaimedFees(tokenId);
+        assertEq(uint256(protocolUnclaimed0), expectedProtocolAmount, "Protocol allocation incorrect");
+
+        vm.stopPrank();
+
+        // Test protocol owner allocation
+        vm.startPrank(owner);
+
+        // Claim protocol fees to the protocol owner
+        uint256 protocolOwnerBalanceBefore = tokenNoAirdrop.balanceOf(protocolOwner);
+        rainbowFactory.claimProtocolFees(address(tokenNoAirdrop), protocolOwner);
+        uint256 protocolOwnerBalanceAfter = tokenNoAirdrop.balanceOf(protocolOwner);
+
+        // Verify protocol owner received the correct allocation
+        assertEq(protocolOwnerBalanceAfter - protocolOwnerBalanceBefore, expectedProtocolAmount, "Protocol owner should receive protocol allocation");
+
+        // Test with modified fee configuration
+        RainbowSuperTokenFactory.FeeConfig memory newConfig = RainbowSuperTokenFactory.FeeConfig({
+            creatorLPFeeBps: 2000,
+            protocolBaseBps: 200, // 2% to protocol
+            creatorBaseBps: 100, // 1% to creator
+            airdropBps: 50, // 0.5% to airdrop
+            hasAirdrop: false,
+            feeToken: address(weth),
+            creator: address(0)
+        });
+
+        rainbowFactory.setDefaultFeeConfig(newConfig);
+        vm.stopPrank();
+
+        // Test new token with updated fee config
+        vm.startPrank(creator2);
+
+        (salt,) = findValidSalt(creator2, "Updated Fee Token", "UFT", bytes32(0), INITIAL_SUPPLY);
+        RainbowSuperToken updatedFeeToken = rainbowFactory.launchRainbowSuperToken(
+            "Updated Fee Token",
+            "UFT",
+            bytes32(0), // No airdrop
+            INITIAL_SUPPLY,
+            200,
+            salt,
+            address(creator2)
+        );
+
+        // With new fee config and no airdrop, creator should get their allocation + airdrop allocation
+        expectedCreatorAmount = (INITIAL_SUPPLY * 100) / 10_000 + (INITIAL_SUPPLY * 50) / 10_000; // 1% + 0.5%
+        expectedProtocolAmount = (INITIAL_SUPPLY * 200) / 10_000; // 2%
+
+        // Check creator allocation includes both creator and airdrop portions with new fees
+        assertEq(updatedFeeToken.balanceOf(creator2), expectedCreatorAmount, "Creator should receive both creator and airdrop allocations with new fees");
+
+        // Check protocol allocation with new fees
+        tokenId = rainbowFactory.tokenPositionIds(address(updatedFeeToken));
+        (protocolUnclaimed0, protocolUnclaimed1) = rainbowFactory.protocolUnclaimedFees(tokenId);
+        assertEq(uint256(protocolUnclaimed0), expectedProtocolAmount, "Protocol allocation incorrect with new fees");
+
+        vm.stopPrank();
+
+        // Verify protocol owner allocation with new fees
+        vm.startPrank(owner);
+        protocolOwnerBalanceBefore = updatedFeeToken.balanceOf(protocolOwner);
+        rainbowFactory.claimProtocolFees(address(updatedFeeToken), protocolOwner);
+        protocolOwnerBalanceAfter = updatedFeeToken.balanceOf(protocolOwner);
+
+        assertEq(
+            protocolOwnerBalanceAfter - protocolOwnerBalanceBefore,
+            expectedProtocolAmount,
+            "Protocol owner should receive correct protocol allocation with new fees"
+        );
+
         vm.stopPrank();
     }
 }

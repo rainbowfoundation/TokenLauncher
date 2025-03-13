@@ -21,6 +21,7 @@ import { INonfungiblePositionManager } from "vendor/v3-periphery/interfaces/INon
 /// @title RainbowSuperTokenFactory
 /// @author CopyPaste - for Rainbow with love <3
 /// @notice A factory contract for creating RainbowSuperTokens and managing their liquidity positions.
+/// @notice Protocol fees are allocated to be sent 🌈 Over the Rainbow 🌈
 contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     using TickMath for int24;
     using SafeTransferLib for ERC20;
@@ -147,10 +148,10 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
 
     /// @dev Default fee configuration
     FeeConfig public defaultFeeConfig = FeeConfig({
-        creatorLPFeeBps: 2000, // 20% of LP fees to creator
-        protocolBaseBps: 69, // 0.69% to protocol if no airdrop
-        creatorBaseBps: 46, // 0.46% to creator with airdrop
-        airdropBps: 23, // 0.23% to airdrop
+        creatorLPFeeBps: 2000, // 50% of LP fees to creator (50% implicit Protocol)
+        protocolBaseBps: 50, // 0.50% to protocol if no airdrop
+        creatorBaseBps: 50, // 0.50% to creator with airdrop
+        airdropBps: 50, // 0.50% to airdrop
         hasAirdrop: false,
         feeToken: address(WETH),
         creator: address(0)
@@ -205,6 +206,8 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         emit NewDefaultPairToken(address(newPairToken));
     }
 
+    /// @notice Sets a new default fee configuration for all tokens made
+    /// @param newConfig The new fee configuration to set
     function setDefaultFeeConfig(FeeConfig calldata newConfig) external onlyOwner {
         if (newConfig.creatorLPFeeBps > 10_000) revert InvalidFeeSplit();
         if (newConfig.protocolBaseBps + newConfig.creatorBaseBps + newConfig.airdropBps > 10_000) {
@@ -330,7 +333,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
 
         bool hasAirdrop = merkleroot != bytes32(0);
 
-        (uint256 lpSupply, uint256 creatorAmount, uint256 airdropAmount) = calculateSupplyAllocation(supply, hasAirdrop);
+        (uint256 lpSupply, uint256 creatorAmount, uint256 protocolAmount, uint256 airdropAmount) = calculateSupplyAllocation(supply, hasAirdrop);
 
         uint256 id;
         assembly {
@@ -351,6 +354,8 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         }
 
         newToken.mint(creator, creatorAmount);
+        // 🌈 Over the Rainbow Token Supply
+        newToken.mint(address(this), protocolAmount);
 
         // Set up fee configuration
         FeeConfig memory config = FeeConfig({
@@ -391,6 +396,9 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
 
         // Store the position ID
         tokenPositionIds[address(newToken)] = tokenId;
+
+        UnclaimedFees storage fees = protocolUnclaimedFees[tokenId];
+        fees.unclaimed0 = uint128(protocolAmount);
 
         emit RainbowSuperTokenCreated(address(newToken), creator, msg.sender, tokenURI);
     }
@@ -437,7 +445,6 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         if (originalChainId == id) revert Unauthorized();
         if (msg.sender != creator) revert Unauthorized();
 
-        //string memory tokenURI = string(abi.encode(keccak256(abi.encode(creator, salt, name, symbol, merkleroot, supply))));
         string memory tokenURI = string(toHexString(keccak256(abi.encode(creator, salt, name, symbol, merkleroot, supply)), 32));
 
         newToken = new RainbowSuperToken{ salt: keccak256(abi.encode(creator, salt)) }(
@@ -455,6 +462,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     ///
     /// @return lpAmount The amount of tokens allocated to LP
     /// @return creatorAmount The amount of tokens allocated to the creator
+    /// @return protocolAmount The amount of tokens allocated to Rainbow
     /// @return airdropAmount The amount of tokens allocated to airdrop
     function calculateSupplyAllocation(
         uint256 totalSupply,
@@ -462,16 +470,19 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     )
         internal
         view
-        returns (uint256 lpAmount, uint256 creatorAmount, uint256 airdropAmount)
+        returns (uint256 lpAmount, uint256 creatorAmount, uint256 protocolAmount, uint256 airdropAmount)
     {
         if (hasAirdrop) {
             creatorAmount = (totalSupply * defaultFeeConfig.creatorBaseBps) / 10_000;
+            protocolAmount = (totalSupply * defaultFeeConfig.protocolBaseBps) / 10_000;
             airdropAmount = (totalSupply * defaultFeeConfig.airdropBps) / 10_000;
         } else {
-            creatorAmount = (totalSupply * defaultFeeConfig.protocolBaseBps) / 10_000;
+            creatorAmount = (totalSupply * defaultFeeConfig.creatorBaseBps) / 10_000;
+            protocolAmount = (totalSupply * defaultFeeConfig.protocolBaseBps) / 10_000;
+            creatorAmount += (totalSupply * defaultFeeConfig.airdropBps) / 10_000; // Add airdrop amount to creator supply
             airdropAmount = 0;
         }
-        lpAmount = totalSupply - creatorAmount - airdropAmount;
+        lpAmount = totalSupply - creatorAmount - airdropAmount - protocolAmount;
     }
 
     /// @param token The token address to collect fees for
@@ -533,6 +544,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         emit FeesClaimed(recipient, tokenId, fees.unclaimed0, fees.unclaimed1);
     }
 
+    /// @notice Claims Protocol Fees to send 🌈 Over the Rainbow 🌈
     /// @param token The token address to claim fees for
     /// @param recipient The recipient of the fees
     function claimProtocolFees(address token, address recipient) external onlyOwner {
@@ -628,7 +640,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         returns (address token)
     {
         bool hasAirdrop = merkleroot != bytes32(0);
-        (,, uint256 airdropAmount) = calculateSupplyAllocation(supply, hasAirdrop);
+        (,,, uint256 airdropAmount) = calculateSupplyAllocation(supply, hasAirdrop);
 
         uint256 id;
         assembly {
