@@ -578,4 +578,255 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
 
         vm.stopPrank();
     }
+
+    function testFuzz_CalculateSupplyAllocation(
+        uint16 creatorLPFeeBps,
+        uint16 protocolBaseBps,
+        uint16 creatorBaseBps,
+        uint16 airdropBps,
+        uint256 initialSupply
+    ) public {
+        // Bound the inputs to reasonable ranges
+        creatorLPFeeBps = uint16(bound(creatorLPFeeBps, 0, 10_000));
+        protocolBaseBps = uint16(bound(protocolBaseBps, 0, 5_000));
+        creatorBaseBps = uint16(bound(creatorBaseBps, 0, 5_000));
+        airdropBps = uint16(bound(airdropBps, 0, 5_000));
+        initialSupply = bound(initialSupply, 1 ether, 1_000_000 ether);
+        
+        // Skip if total basis points would exceed 10_000 (100%)
+        vm.assume(protocolBaseBps + creatorBaseBps + airdropBps <= 10_000);
+        
+        // Set the fee configuration
+        vm.startPrank(owner);
+        RainbowSuperTokenFactory.FeeConfig memory newConfig = RainbowSuperTokenFactory.FeeConfig({
+            creatorLPFeeBps: creatorLPFeeBps,
+            protocolBaseBps: protocolBaseBps,
+            creatorBaseBps: creatorBaseBps,
+            airdropBps: airdropBps,
+            hasAirdrop: false,
+            feeToken: address(weth),
+            creator: address(0)
+        });
+        
+        rainbowFactory.setDefaultFeeConfig(newConfig);
+        vm.stopPrank();
+        
+        // Test both with and without airdrop
+        _testAllocationWithConfig(initialSupply, false, creatorBaseBps, protocolBaseBps, airdropBps);
+        _testAllocationWithConfig(initialSupply, true, creatorBaseBps, protocolBaseBps, airdropBps);
+    }
+
+    // Helper function to test allocation with specific configuration
+    function _testAllocationWithConfig(
+        uint256 supply,
+        bool hasAirdrop,
+        uint16 creatorBaseBps, 
+        uint16 protocolBaseBps,
+        uint16 airdropBps
+    ) internal {
+        vm.startPrank(creator1);
+        
+        bytes32 merkleroot = hasAirdrop ? bytes32(keccak256("test")) : bytes32(0);
+        string memory tokenName = hasAirdrop ? "Airdrop Test" : "No Airdrop Test";
+        string memory tokenSymbol = hasAirdrop ? "AIR" : "NAIR";
+        
+        (bytes32 salt,) = findValidSalt(creator1, tokenName, tokenSymbol, merkleroot, supply);
+        
+        RainbowSuperToken token = rainbowFactory.launchRainbowSuperToken(
+            tokenName, 
+            tokenSymbol, 
+            merkleroot, 
+            supply, 
+            200, 
+            salt, 
+            address(creator1)
+        );
+        
+        // Calculate expected allocations
+        uint256 expectedProtocolAmount = (supply * protocolBaseBps) / 10_000;
+        
+        uint256 expectedCreatorAmount;
+        if (hasAirdrop) {
+            // With airdrop, creator only gets their base allocation
+            expectedCreatorAmount = (supply * creatorBaseBps) / 10_000;
+        } else {
+            // Without airdrop, creator gets their base allocation AND the airdrop allocation
+            expectedCreatorAmount = (supply * creatorBaseBps) / 10_000 + 
+                                    (supply * airdropBps) / 10_000;
+        }
+        
+        uint256 expectedAirdropAmount = hasAirdrop ? (supply * airdropBps) / 10_000 : 0;
+        
+        // Check creator allocation
+        assertApproxEqAbs(
+            token.balanceOf(creator1), 
+            expectedCreatorAmount, 
+            1, // Allow 1 wei difference for rounding
+            "Creator allocation incorrect"
+        );
+        
+        // Check protocol allocation
+        uint256 tokenId = rainbowFactory.tokenPositionIds(address(token));
+        (uint128 protocolUnclaimed0, uint128 protocolUnclaimed1) = rainbowFactory.protocolUnclaimedFees(tokenId);
+        
+        // For our test setup, the token address is always less than WETH, so unclaimed0 is the token
+        assertApproxEqAbs(
+            uint256(protocolUnclaimed0), 
+            expectedProtocolAmount, 
+            1, // Allow 1 wei difference for rounding
+            "Protocol allocation incorrect"
+        );
+        vm.stopPrank();
+    }
+
+    function testFuzz_ProtocolOwnerAllocation(
+        uint16 protocolBaseBps,
+        uint256 initialSupply
+    ) public {
+        protocolBaseBps = uint16(bound(protocolBaseBps, 1, 1_000)); // 0.01% to 10%
+        initialSupply = bound(initialSupply, 1 ether, 1_000_000 ether);
+        
+        // Set a specific protocol fee
+        vm.startPrank(owner);
+        RainbowSuperTokenFactory.FeeConfig memory newConfig = RainbowSuperTokenFactory.FeeConfig({
+            creatorLPFeeBps: 2000,
+            protocolBaseBps: protocolBaseBps,
+            creatorBaseBps: 100,
+            airdropBps: 50,
+            hasAirdrop: false,
+            feeToken: address(weth),
+            creator: address(0)
+        });
+        
+        rainbowFactory.setDefaultFeeConfig(newConfig);
+        vm.stopPrank();
+        
+        // Launch a token with the new configuration
+        vm.startPrank(creator1);
+        (bytes32 salt,) = findValidSalt(creator1, "Protocol Test", "PROT", bytes32(0), initialSupply);
+        RainbowSuperToken token = rainbowFactory.launchRainbowSuperToken(
+            "Protocol Test", 
+            "PROT", 
+            bytes32(0), 
+            initialSupply, 
+            200, 
+            salt, 
+            address(creator1)
+        );
+        vm.stopPrank();
+        
+        // Calculate expected protocol fee
+        uint256 expectedProtocolAmount = (initialSupply * protocolBaseBps) / 10_000;
+        
+        // Claim protocol fees to a specific address
+        address protocolReceiver = address(0xBEEF);
+        
+        uint256 balanceBefore = token.balanceOf(protocolReceiver);
+        
+        vm.prank(owner);
+        rainbowFactory.claimProtocolFees(address(token), protocolReceiver);
+        
+        uint256 balanceAfter = token.balanceOf(protocolReceiver);
+        
+        // Verify the protocol receiver got the expected amount
+        assertApproxEqAbs(
+            balanceAfter - balanceBefore, 
+            expectedProtocolAmount, 
+            1, // Allow 1 wei difference for rounding
+            "Protocol receiver didn't get expected allocation"
+        );
+    }
+
+    function testFuzz_InvalidFeeSplitReverts() public {
+        vm.startPrank(owner);
+        
+        uint16 invalidCreatorLPFeeBps = 10_001; // Just over the limit
+        
+        RainbowSuperTokenFactory.FeeConfig memory invalidLPConfig = RainbowSuperTokenFactory.FeeConfig({
+            creatorLPFeeBps: invalidCreatorLPFeeBps, // This exceeds 100%
+            protocolBaseBps: 100,
+            creatorBaseBps: 100,
+            airdropBps: 50,
+            hasAirdrop: false,
+            feeToken: address(weth),
+            creator: address(0)
+        });
+        
+        vm.expectRevert(RainbowSuperTokenFactory.InvalidFeeSplit.selector);
+        rainbowFactory.setDefaultFeeConfig(invalidLPConfig);
+        
+        vm.stopPrank();
+    }
+
+    function testFuzz_InvalidSupplyAllocation(
+        uint16 protocolBaseBps,
+        uint16 creatorBaseBps,
+        uint16 airdropBps
+    ) public {
+        // Testing InvalidSupplyAllocation error
+        // Bound the inputs to ensure they can sum to more than 10_000
+        protocolBaseBps = uint16(bound(uint256(protocolBaseBps), 3_334, 5_000));
+        creatorBaseBps = uint16(bound(uint256(creatorBaseBps), 3_334, 5_000));
+        airdropBps = uint16(bound(uint256(airdropBps), 3_334, 5_000));
+        
+        // With these bounds, the sum will always be greater than 10_000
+        // (at minimum: 3_334 + 3_334 + 3_334 = 10_002)
+        
+        vm.startPrank(owner);
+        RainbowSuperTokenFactory.FeeConfig memory invalidBaseConfig = RainbowSuperTokenFactory.FeeConfig({
+            creatorLPFeeBps: 2000, // This is valid
+            protocolBaseBps: protocolBaseBps,
+            creatorBaseBps: creatorBaseBps,
+            airdropBps: airdropBps,
+            hasAirdrop: false,
+            feeToken: address(weth),
+            creator: address(0)
+        });
+        
+        vm.expectRevert(RainbowSuperTokenFactory.InvalidSupplyAllocation.selector);
+        rainbowFactory.setDefaultFeeConfig(invalidBaseConfig);
+        
+        vm.stopPrank();
+    }
+
+    function testFuzz_AllocationWithZeroSupply(uint16 feeBps) public {
+        // Make sure feeBps is within valid range and total allocation doesn't exceed 10_000
+        feeBps = uint16(bound(uint256(feeBps), 0, 9_850)); // Leave room for creatorBaseBps and airdropBps
+        
+        // Calculate creator and airdrop bps to ensure total is valid
+        uint16 creatorBaseBps = 100;
+        uint16 airdropBps = 50;
+        
+        vm.assume(feeBps + creatorBaseBps + airdropBps <= 10_000);
+        
+        vm.startPrank(owner);
+        RainbowSuperTokenFactory.FeeConfig memory config = RainbowSuperTokenFactory.FeeConfig({
+            creatorLPFeeBps: 2000,
+            protocolBaseBps: feeBps,
+            creatorBaseBps: creatorBaseBps,
+            airdropBps: airdropBps,
+            hasAirdrop: false,
+            feeToken: address(weth),
+            creator: address(0)
+        });
+        
+        rainbowFactory.setDefaultFeeConfig(config);
+        vm.stopPrank();
+        
+        vm.startPrank(creator1);
+        (bytes32 salt,) = findValidSalt(creator1, "Zero Supply", "ZERO", bytes32(0), 0);
+        
+        vm.expectRevert(RainbowSuperTokenFactory.ZeroSupply.selector);
+        rainbowFactory.launchRainbowSuperToken(
+            "Zero Supply", 
+            "ZERO", 
+            bytes32(0), 
+            0, // Zero supply
+            200, 
+            salt, 
+            address(creator1)
+        );
+        
+        vm.stopPrank();
+    }
 }
