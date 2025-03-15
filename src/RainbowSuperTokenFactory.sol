@@ -49,6 +49,14 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
                                  EVENTS
     //////////////////////////////////////////////////////////////*/
 
+    /// @param pot The address of the new Over the Rainbow Pot
+    event NewPot(address indexed pot);
+
+    /// @param recipient The address of the recipient
+    /// @param token The token address to claim initial fees for
+    /// @param amount The amount of tokens claimed
+    event OverTheRainbowClaimed(address indexed recipient, address indexed token, uint256 amount);
+
     /// @param token The address of the newly created token
     /// @param owner The address of the creator of the token
     /// @param creator The address of the creator of the token
@@ -140,6 +148,9 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @dev The mapping from tokenId to protocol's unclaimed fees
     mapping(uint256 => UnclaimedFees) public protocolUnclaimedFees;
 
+    /// @dev 🌈
+    address public overTheRainbowPot;
+
     /// @dev The Uniswap V3 Pool fee
     uint24 public POOL_FEE = 10_000;
 
@@ -148,8 +159,8 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
 
     /// @dev Default fee configuration
     FeeConfig public defaultFeeConfig = FeeConfig({
-        creatorLPFeeBps: 2000, // 50% of LP fees to creator (50% implicit Protocol)
-        protocolBaseBps: 50, // 0.50% to protocol if no airdrop
+        creatorLPFeeBps: 5000, // 50% of LP fees to creator (50% implicit Protocol LP fee)
+        protocolBaseBps: 500, // 5.00% to protocol if no airdrop
         creatorBaseBps: 50, // 0.50% to creator with airdrop
         airdropBps: 50, // 0.50% to airdrop
         hasAirdrop: false,
@@ -170,6 +181,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @param _baseTokenURI The base URI for all tokens
     constructor(
         address _uniswapV3Factory,
+        address _overTheRainbow,
         address _nonfungiblePositionManager,
         address _swapRouter,
         address _weth,
@@ -182,6 +194,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         uniswapV3Factory = IUniswapV3Factory(_uniswapV3Factory);
         nonfungiblePositionManager = INonfungiblePositionManager(_nonfungiblePositionManager);
         baseTokenURI = _baseTokenURI;
+        overTheRainbowPot = _overTheRainbow;
 
         WETH.approve(_swapRouter, type(uint256).max);
         defaultPairToken = ERC20(_weth);
@@ -354,8 +367,9 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         }
 
         newToken.mint(creator, creatorAmount);
+
         // 🌈 Over the Rainbow Token Supply
-        newToken.mint(address(this), protocolAmount);
+        newToken.mint(overTheRainbowPot, protocolAmount);
 
         // Set up fee configuration
         FeeConfig memory config = FeeConfig({
@@ -396,9 +410,6 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
 
         // Store the position ID
         tokenPositionIds[address(newToken)] = tokenId;
-
-        UnclaimedFees storage fees = protocolUnclaimedFees[tokenId];
-        fees.unclaimed0 = uint128(protocolAmount);
 
         emit RainbowSuperTokenCreated(address(newToken), creator, msg.sender, tokenURI);
     }
@@ -455,6 +466,13 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /*//////////////////////////////////////////////////////////////
                             FEE MANAGEMENT
     //////////////////////////////////////////////////////////////*/
+
+    /// @param newPot Update the address for the Over the Rainbow Pot
+    function setPot(address newPot) external onlyOwner {
+        overTheRainbowPot = newPot;
+
+        emit NewPot(newPot);
+    }
 
     /// @notice Calculate the allocation of supply for LP, creator and airdrop
     /// @param totalSupply The total supply of the token

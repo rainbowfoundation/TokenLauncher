@@ -28,6 +28,7 @@ contract BaseRainbowTest is Test {
     address public creator2 = makeAddr("creator2");
     address public user1 = makeAddr("user1");
     address public user2 = makeAddr("user2");
+    address public pot = makeAddr("pot");
 
     // Constants for testing
     uint256 constant INITIAL_SUPPLY = 10 ether;
@@ -56,7 +57,7 @@ contract BaseRainbowTest is Test {
 
         // Deploy Rainbow factory
         rainbowFactory =
-            new RainbowSuperTokenFactory(address(factory), address(nftPositionManager), address(swapRouter), address(weth), "https://rainbow.me/tokens");
+            new RainbowSuperTokenFactory(address(factory), address(pot), address(nftPositionManager), address(swapRouter), address(weth), "https://rainbow.me/tokens");
         vm.stopPrank();
     }
 }

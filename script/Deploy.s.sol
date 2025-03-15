@@ -14,10 +14,11 @@ contract DeplyRainbow is Script {
         address nonfungiblePositionManager = vm.envAddress("NONFUNGIBLE_POSITION_MANAGER");
         address swapRouter = vm.envAddress("SWAP_ROUTER");
         address weth = vm.envAddress("WETH");
+        address pot = vm.envAddress("POT");
 
         console.log("Deploying RainbowSuperTokenFactory on chain ", block.chainid);
         RainbowSuperTokenFactory factory =
-            new RainbowSuperTokenFactory(uniswapV3Factory, nonfungiblePositionManager, swapRouter, weth, "https://rainbow.me/tokens");
+            new RainbowSuperTokenFactory(uniswapV3Factory, address(pot), nonfungiblePositionManager, swapRouter, weth, "https://rainbow.me/tokens");
         console.log("Deployed RainbowSuperTokenFactory at ", address(factory));
     }
 }
