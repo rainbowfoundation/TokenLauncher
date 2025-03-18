@@ -124,6 +124,7 @@ contract RainbowSuperToken is ERC20, Owned {
             balanceOf[recipient] += amount;
         }
 
+        emit Transfer(address(0), recipient, amount);
         emit Claim(recipient, amount);
     }
 
