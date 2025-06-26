@@ -69,6 +69,9 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
 
         uint256 positionId = rainbowFactory.tokenPositionIds(address(token));
         assertTrue(positionId > 0);
+
+        // Verify ownership has been renounced
+        assertEq(token.owner(), address(0), "Token ownership should be renounced");
         vm.stopPrank();
     }
 
@@ -220,6 +223,9 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
 
         uint256 positionId = rainbowFactory.tokenPositionIds(address(token));
         assertTrue(positionId > 0);
+
+        // Verify ownership has been renounced
+        assertEq(token.owner(), address(0), "Token ownership should be renounced");
         vm.stopPrank();
     }
 
@@ -575,5 +581,35 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         rainbowFactory.setPot(user2);
 
         assertEq(address(rainbowFactory.overTheRainbowPot()), user2);
+    }
+
+    function testOwnershipRenouncedPreventsMiniting() public {
+        vm.startPrank(creator1);
+
+        (bytes32 salt,) = findValidSalt(creator1, "Test Token", "TEST", bytes32(0), INITIAL_SUPPLY);
+
+        RainbowSuperToken token = rainbowFactory.launchRainbowSuperToken("Test Token", "TEST", bytes32(0), INITIAL_SUPPLY, 200, salt, address(creator1));
+
+        // Verify ownership has been renounced
+        assertEq(token.owner(), address(0), "Token ownership should be renounced");
+
+        // Try to mint as anyone - should fail since owner is address(0)
+        vm.expectRevert("UNAUTHORIZED");
+        token.mint(user1, 1000e18);
+        vm.stopPrank();
+
+        // Try to mint as the factory - should also fail
+        vm.prank(address(rainbowFactory));
+        vm.expectRevert("UNAUTHORIZED");
+        token.mint(user1, 1000e18);
+
+        // Try to mint as the original creator - should also fail
+        vm.prank(creator1);
+        vm.expectRevert("UNAUTHORIZED");
+        token.mint(user1, 1000e18);
+
+        // Verify no one can claim ownership back
+        vm.expectRevert("UNAUTHORIZED");
+        token.transferOwnership(creator1);
     }
 }

@@ -412,6 +412,9 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         tokenPositionIds[address(newToken)] = tokenId;
 
         emit RainbowSuperTokenCreated(address(newToken), creator, msg.sender, tokenURI);
+
+        // Renounce ownership to make the token immutable
+        newToken.renounceOwnership();
     }
 
     /// @notice Launch a RainbowSuperToken at the same address as on the original chain

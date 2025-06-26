@@ -134,6 +134,13 @@ contract RainbowSuperToken is ERC20, Owned {
         _mint(recipient, amount);
     }
 
+    /// @notice Renounce ownership of the contract
+    /// @dev Sets the owner to address(0), making the contract permanently ownerless
+    function renounceOwnership() external onlyOwner {
+        owner = address(0);
+        emit OwnershipTransferred(msg.sender, address(0));
+    }
+
     /*//////////////////////////////////////////////////////////////
                             RAINBOW METADATA
     //////////////////////////////////////////////////////////////*/
