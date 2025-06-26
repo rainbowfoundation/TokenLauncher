@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 import "./BaseRainbowTest.t.sol";
 import { MockERC20, ERC20 } from "test/mocks/MockERC20.sol";
 import { RainbowSuperToken } from "../src/RainbowSuperToken.sol";
+import { Merkle } from "lib/murky/src/Merkle.sol";
 
 contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
     bytes32 public constant MERKLE_ROOT = keccak256("test");
@@ -623,5 +624,121 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         // Verify no one can claim ownership back
         vm.expectRevert("UNAUTHORIZED");
         token.transferOwnership(creator1);
+    }
+
+    function testClaimsWorkAfterOwnershipRenounced() public {
+        vm.startPrank(creator1);
+        
+        // Get airdrop allocation amount first to set realistic claim amounts
+        (, uint16 airdropBps) = getCreatorAndAirdropBps();
+        uint256 expectedAirdropAmount = (INITIAL_SUPPLY * airdropBps) / 10_000;
+        
+        // Create merkle tree for airdrop claims with realistic amounts
+        // Each user can claim 1/4 of the airdrop allocation
+        uint256 claimAmount = expectedAirdropAmount / 4;
+        bytes32[] memory data = new bytes32[](4);
+        data[1] = bytes32(keccak256(bytes.concat(keccak256(abi.encode(user1, claimAmount)))));
+        data[2] = bytes32(keccak256(bytes.concat(keccak256(abi.encode(user2, claimAmount)))));
+        data[3] = bytes32(keccak256(bytes.concat(keccak256(abi.encode(vm.addr(3), claimAmount)))));
+        
+        Merkle tempMerkle = new Merkle();
+        bytes32 merkleRoot = tempMerkle.getRoot(data);
+        
+        (bytes32 salt,) = findValidSalt(creator1, "Claim Test", "CLAIM", merkleRoot, INITIAL_SUPPLY);
+        
+        // Launch token with airdrop via factory (auto-renounces ownership)
+        RainbowSuperToken token = rainbowFactory.launchRainbowSuperToken(
+            "Claim Test", 
+            "CLAIM", 
+            merkleRoot, 
+            INITIAL_SUPPLY, 
+            200, 
+            salt, 
+            address(creator1)
+        );
+        
+        // Verify ownership is renounced
+        assertEq(token.owner(), address(0), "Ownership should be renounced");
+        
+        // Verify airdrop tokens are in the contract
+        assertEq(token.balanceOf(address(token)), expectedAirdropAmount, "Contract should hold airdrop tokens");
+        
+        vm.stopPrank();
+        
+        // User 1 claims successfully
+        bytes32[] memory proof1 = tempMerkle.getProof(data, 1);
+        vm.prank(user1);
+        token.claim(proof1, user1, claimAmount);
+        assertEq(token.balanceOf(user1), claimAmount, "User1 should receive tokens");
+        
+        // User 2 claims successfully
+        bytes32[] memory proof2 = tempMerkle.getProof(data, 2);
+        vm.prank(user2);
+        token.claim(proof2, user2, claimAmount);
+        assertEq(token.balanceOf(user2), claimAmount, "User2 should receive tokens");
+        
+        // Verify claims work correctly despite no owner
+        uint256 remainingBalance = token.balanceOf(address(token));
+        assertEq(remainingBalance, expectedAirdropAmount - (claimAmount * 2), "Contract balance should decrease correctly");
+        assertTrue(remainingBalance < expectedAirdropAmount, "Contract balance should decrease after claims");
+    }
+
+    function testFixedSupplyAfterCreation() public {
+        vm.startPrank(creator1);
+        
+        // Launch token via factory with specific allocations
+        bytes32 merkleRoot = keccak256("test merkle");
+        (bytes32 salt,) = findValidSalt(creator1, "Fixed Supply", "FIXED", merkleRoot, INITIAL_SUPPLY);
+        
+        RainbowSuperToken token = rainbowFactory.launchRainbowSuperToken(
+            "Fixed Supply", 
+            "FIXED", 
+            merkleRoot, 
+            INITIAL_SUPPLY, 
+            200, 
+            salt, 
+            address(creator1)
+        );
+        
+        // Get all allocation amounts
+        (,uint16 protocolBaseBps, uint16 creatorBaseBps, uint16 airdropBps,,, ) = rainbowFactory.defaultFeeConfig();
+        
+        // Calculate expected allocations
+        uint256 expectedCreatorAmount = (INITIAL_SUPPLY * creatorBaseBps) / 10_000;
+        uint256 expectedProtocolAmount = (INITIAL_SUPPLY * protocolBaseBps) / 10_000;
+        uint256 expectedAirdropAmount = (INITIAL_SUPPLY * airdropBps) / 10_000;
+        uint256 expectedLpAmount = INITIAL_SUPPLY - expectedCreatorAmount - expectedProtocolAmount - expectedAirdropAmount;
+        
+        // Verify total supply equals expected amount
+        assertEq(token.totalSupply(), INITIAL_SUPPLY, "Total supply should equal initial supply");
+        
+        // Verify all allocations sum correctly
+        uint256 creatorBalance = token.balanceOf(creator1);
+        uint256 protocolBalance = token.balanceOf(pot);
+        uint256 airdropBalance = token.balanceOf(address(token));
+        uint256 lpBalance = token.balanceOf(address(rainbowFactory)); // LP tokens held by factory initially
+        
+        // Note: LP tokens are transferred to Uniswap position, so we check position instead
+        uint256 positionId = rainbowFactory.tokenPositionIds(address(token));
+        assertTrue(positionId > 0, "Position should exist");
+        
+        // Verify allocations (creator, protocol, airdrop)
+        assertEq(creatorBalance, expectedCreatorAmount, "Creator allocation incorrect");
+        assertEq(protocolBalance, expectedProtocolAmount, "Protocol allocation incorrect");
+        assertEq(airdropBalance, expectedAirdropAmount, "Airdrop allocation incorrect");
+        
+        // Verify no additional minting is possible (owner is address(0))
+        vm.expectRevert("UNAUTHORIZED");
+        token.mint(user1, 1e18);
+        
+        vm.stopPrank();
+        
+        // Even the factory cannot mint more
+        vm.prank(address(rainbowFactory));
+        vm.expectRevert("UNAUTHORIZED");
+        token.mint(user1, 1e18);
+        
+        // Verify total supply remains constant
+        assertEq(token.totalSupply(), INITIAL_SUPPLY, "Total supply should not change");
     }
 }
