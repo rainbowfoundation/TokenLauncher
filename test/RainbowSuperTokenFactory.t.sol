@@ -299,6 +299,89 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         vm.stopPrank();
     }
 
+    // Test that getUnclaimedFees works correctly
+    function testGetUnclaimedFees() public {
+        vm.startPrank(creator1);
+
+        (bytes32 salt,) = findValidSalt(creator1, "Fee Token", "FEE", MERKLE_ROOT, INITIAL_SUPPLY);
+
+        // Launch token
+        RainbowSuperToken token = rainbowFactory.launchRainbowSuperToken("Fee Token", "FEE", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, creator1);
+
+        assertTrue(address(token) < address(weth), "Token address must be less than WETH");
+
+        // Initially, unclaimed fees should be zero
+        (uint256 creatorFee0, uint256 creatorFee1, uint256 protocolFee0, uint256 protocolFee1) = rainbowFactory.getUnclaimedFees(address(token));
+        assertEq(creatorFee0, 0);
+        assertEq(creatorFee1, 0);
+        assertEq(protocolFee0, 0);
+        assertEq(protocolFee1, 0);
+
+        // Get the pool address
+        address poolAddress = factory.getPool(address(token), address(weth), POOL_FEE);
+        require(poolAddress != address(0), "Pool not created");
+
+        // Deal some ETH and perform swap to generate fees
+        vm.deal(user1, 100 ether);
+        vm.startPrank(user1);
+        weth.deposit{ value: 50 ether }();
+        weth.approve(address(swapRouter), type(uint256).max);
+
+        // Perform swap WETH -> Token to generate fees
+        IV3SwapRouter.ExactInputSingleParams memory params = IV3SwapRouter.ExactInputSingleParams({
+            tokenIn: address(weth),
+            tokenOut: address(token),
+            fee: POOL_FEE,
+            recipient: user1,
+            amountIn: 10 ether,
+            amountOutMinimum: 0,
+            sqrtPriceLimitX96: 0
+        });
+
+        swapRouter.exactInputSingle(params);
+        vm.stopPrank();
+
+        // Mine some blocks to ensure fees are accumulated
+        vm.roll(block.number + 100);
+
+        // Now check unclaimed fees - they should still be zero until collected
+        (creatorFee0, creatorFee1, protocolFee0, protocolFee1) = rainbowFactory.getUnclaimedFees(address(token));
+        assertEq(creatorFee0, 0);
+        assertEq(creatorFee1, 0);
+        assertEq(protocolFee0, 0);
+        assertEq(protocolFee1, 0);
+
+        // Claim fees which internally calls collectFees
+        vm.startPrank(creator1);
+        rainbowFactory.claimCreatorFees(address(token), creator1);
+        vm.stopPrank();
+
+        // After claiming creator fees, protocol fees should still be visible
+        (creatorFee0, creatorFee1, protocolFee0, protocolFee1) = rainbowFactory.getUnclaimedFees(address(token));
+        assertEq(creatorFee0, 0); // Creator fees were claimed
+        assertEq(creatorFee1, 0);
+        assertTrue(protocolFee0 > 0 || protocolFee1 > 0, "Protocol should have unclaimed fees");
+
+        // Claim protocol fees
+        vm.startPrank(owner);
+        rainbowFactory.claimProtocolFees(address(token), owner);
+        vm.stopPrank();
+
+        // All fees should now be zero
+        (creatorFee0, creatorFee1, protocolFee0, protocolFee1) = rainbowFactory.getUnclaimedFees(address(token));
+        assertEq(creatorFee0, 0);
+        assertEq(creatorFee1, 0);
+        assertEq(protocolFee0, 0);
+        assertEq(protocolFee1, 0);
+    }
+
+    // Test that getUnclaimedFees reverts if the token is invalid
+    function testGetUnclaimedFeesInvalidToken() public {
+        // Test with a token that wasn't created by this factory
+        vm.expectRevert(RainbowSuperTokenFactory.InvalidToken.selector);
+        rainbowFactory.getUnclaimedFees(address(0x1234));
+    }
+
     // Helper function to get creator and airdrop basis points
     function getCreatorAndAirdropBps() internal view returns (uint16, uint16) {
         (,, uint16 creatorBaseBps, uint16 airdropBps,,,) = rainbowFactory.defaultFeeConfig();

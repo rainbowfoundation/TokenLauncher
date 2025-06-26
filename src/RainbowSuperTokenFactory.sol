@@ -503,6 +503,30 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         lpAmount = totalSupply - creatorAmount - airdropAmount - protocolAmount;
     }
 
+    /// @notice Get the unclaimed fees for a token
+    /// @param token The token address to get the unclaimed fees for
+    ///
+    /// @return creatorFee0 The unclaimed fees for the creator
+    /// @return creatorFee1 The unclaimed fees for the creator
+    /// @return protocolFee0 The unclaimed fees for the protocol
+    /// @return protocolFee1 The unclaimed fees for the protocol
+    function getUnclaimedFees(address token) external view returns (
+        uint256 creatorFee0,
+        uint256 creatorFee1,
+        uint256 protocolFee0,
+        uint256 protocolFee1
+    ) {
+        // Get the token ID
+        uint256 tokenId = tokenPositionIds[token];
+        if (tokenId == 0) revert InvalidToken();
+
+        // Get the unclaimed fees
+        creatorFee0 = creatorUnclaimedFees[tokenId].unclaimed0;
+        creatorFee1 = creatorUnclaimedFees[tokenId].unclaimed1;
+        protocolFee0 = protocolUnclaimedFees[tokenId].unclaimed0;
+        protocolFee1 = protocolUnclaimedFees[tokenId].unclaimed1;
+    }
+
     /// @param token The token address to collect fees for
     function collectFees(address token) internal {
         uint256 tokenId = tokenPositionIds[token];
