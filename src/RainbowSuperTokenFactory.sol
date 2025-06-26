@@ -504,7 +504,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     }
 
     /// @param token The token address to collect fees for
-    function collectFees(address token) external {
+    function collectFees(address token) internal {
         uint256 tokenId = tokenPositionIds[token];
         if (tokenId == 0) revert InvalidToken();
 
@@ -537,6 +537,8 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @param token The token address to claim fees for
     /// @param recipient The recipient of the fees
     function claimCreatorFees(address token, address recipient) external {
+        collectFees(token);
+
         if (msg.sender != tokenFeeConfig[token].creator) revert Unauthorized();
         uint256 tokenId = tokenPositionIds[token];
 
@@ -566,6 +568,8 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @param token The token address to claim fees for
     /// @param recipient The recipient of the fees
     function claimProtocolFees(address token, address recipient) external onlyOwner {
+        collectFees(token);
+        
         uint256 tokenId = tokenPositionIds[token];
 
         UnclaimedFees memory fees = protocolUnclaimedFees[tokenId];

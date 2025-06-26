@@ -265,10 +265,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         uint256 creatorToken0Before = address(token) < address(weth) ? token.balanceOf(creator1) : weth.balanceOf(creator1);
         uint256 creatorToken1Before = address(token) < address(weth) ? weth.balanceOf(creator1) : token.balanceOf(creator1);
 
-        // Collect fees
-        rainbowFactory.collectFees(address(token));
-
-        // Try claiming fees as creator
+        // Collect fees and claim creator fees
         rainbowFactory.claimCreatorFees(address(token), creator1);
 
         // Verify creator received fees
@@ -443,10 +440,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         uint256 creatorToken0Before = token.balanceOf(creator1);
         uint256 creatorToken1Before = usdc.balanceOf(creator1);
 
-        // Collect fees
-        rainbowFactory.collectFees(address(token));
-
-        // Claim creator fees
+        // Collect fees and claim creator fees
         rainbowFactory.claimCreatorFees(address(token), creator1);
 
         // Verify creator received fees
