@@ -371,6 +371,11 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         // 🌈 Over the Rainbow Token Supply
         newToken.mint(overTheRainbowPot, protocolAmount);
 
+        // Mint airdrop allocation to the token contract itself
+        if (airdropAmount > 0) {
+            newToken.mint(address(newToken), airdropAmount);
+        }
+
         // Set up fee configuration
         FeeConfig memory config = FeeConfig({
             creatorLPFeeBps: defaultFeeConfig.creatorLPFeeBps,

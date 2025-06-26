@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 // Contracts
 import { Owned } from "lib/solmate/src/auth/Owned.sol";
 import { ERC20 } from "lib/solmate/src/tokens/ERC20.sol";
+import { SafeTransferLib } from "lib/solmate/src/utils/SafeTransferLib.sol";
 
 import { MerkleProofLib } from "lib/solady/src/utils/MerkleProofLib.sol";
 
@@ -12,6 +13,7 @@ import { MerkleProofLib } from "lib/solady/src/utils/MerkleProofLib.sol";
 /// @notice An implementation of ERC20 extending with IERC7802 to allow for unified use across the
 ///     Superchain.
 contract RainbowSuperToken is ERC20, Owned {
+    using SafeTransferLib for ERC20;
     /*//////////////////////////////////////////////////////////////
                                  EVENTS
     //////////////////////////////////////////////////////////////*/
@@ -36,11 +38,10 @@ contract RainbowSuperToken is ERC20, Owned {
                               CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
     /// @dev The merkle root to be used for claims
-
     bytes32 public merkleRoot;
 
-    /// @dev The maximum total supply of the token that can be minted
-    uint256 public maxTotalMintedSupply;
+    /// @dev The total amount allocated for airdrops
+    uint256 public airdropAllocation;
 
     /// @dev Original Chain the token was deployed on
     uint256 public originalChainId;
@@ -49,13 +50,13 @@ contract RainbowSuperToken is ERC20, Owned {
     /// @param symbol The symbol of the token
     /// @param _tokenURI A Url pointing to the metadata for the token
     /// @param _merkleRoot The merkle root to be used for claims
-    /// @param _maxTotalMintedSupply The maximum total supply of the token that can be minted
+    /// @param _airdropAllocation The total amount allocated for airdrops
     constructor(
         string memory name,
         string memory symbol,
         string memory _tokenURI,
         bytes32 _merkleRoot,
-        uint256 _maxTotalMintedSupply,
+        uint256 _airdropAllocation,
         uint256 _originalChainId
     )
         ERC20(name, symbol, 18)
@@ -63,7 +64,7 @@ contract RainbowSuperToken is ERC20, Owned {
     {
         tokenURI = _tokenURI;
         merkleRoot = _merkleRoot;
-        maxTotalMintedSupply = _maxTotalMintedSupply;
+        airdropAllocation = _airdropAllocation;
         originalChainId = _originalChainId;
     }
 
@@ -77,11 +78,8 @@ contract RainbowSuperToken is ERC20, Owned {
     }
 
     /*//////////////////////////////////////////////////////////////
-                                MINTING
+                                CLAIMING
     //////////////////////////////////////////////////////////////*/
-
-    /// @dev Tracks the number of tokens we have minted in claims so far
-    uint256 public totalMintedSupply;
 
     /// @dev Tracks if a user has claimed their tokens
     mapping(address => bool) public claimed;
@@ -108,23 +106,19 @@ contract RainbowSuperToken is ERC20, Owned {
             revert InvalidProof();
         }
 
-        if (amount + totalMintedSupply > maxTotalMintedSupply) {
-            amount = maxTotalMintedSupply - totalMintedSupply;
+        // Ensure we don't transfer more than available
+        uint256 contractBalance = balanceOf[address(this)];
+        if (amount > contractBalance) {
+            amount = contractBalance;
         }
 
         if (amount == 0) {
             revert CannotClaimZero();
         }
 
-        totalMintedSupply += amount;
-        totalSupply += amount;
-
-        // Mint the points to the recipient
-        unchecked {
-            balanceOf[recipient] += amount;
-        }
-
-        emit Transfer(address(0), recipient, amount);
+        // Use SafeTransferLib for secure transfer
+        ERC20(address(this)).safeTransfer(recipient, amount);
+        
         emit Claim(recipient, amount);
     }
 

@@ -34,6 +34,9 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         }
 
         token = new RainbowSuperToken("Test Token", "TEST", "https://rainbow.me/testMetadata", root, amount * 100, id);
+        
+        // Mint the airdrop allocation to the token contract itself
+        token.mint(address(token), amount * 100);
     }
 
     function testClaim() public {
@@ -47,6 +50,9 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         token.claim(proof, recipient, amount);
 
         assertEq(token.balanceOf(recipient), initialBalance + amount);
+        
+        // Verify contract balance decreased
+        assertEq(token.balanceOf(address(token)), amount * 99);
 
         vm.expectRevert(RainbowSuperToken.AlreadyClaimed.selector);
         token.claim(proof, recipient, amount);
@@ -63,6 +69,9 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
             assertEq(token.balanceOf(_user), _initialBalance + amount);
         }
 
+        // After claiming 100 tokens, contract should have no tokens left
+        assertEq(token.balanceOf(address(token)), 0);
+        
         // No tokens after we've claimed all of the alloted supply
         address user = vm.addr(106);
         proof = merkle.getProof(_data, 106);
@@ -85,6 +94,9 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
     address internal constant SUPERCHAIN_TOKEN_BRIDGE = 0x4200000000000000000000000000000000000028;
 
     function testOnlySuperchainBridgeCanMint(uint256 amount) public {
+        // Bound the amount to prevent overflow
+        amount = bound(amount, 0, type(uint256).max / 2);
+        
         vm.expectRevert(RainbowSuperToken.Unauthorized.selector);
         token.crosschainMint(address(this), amount);
 
@@ -97,6 +109,10 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
     }
 
     function testOnlySuperchainBridgeCanBurn(uint256 amount) public {
+        // Bound the amount to prevent overflow
+        amount = bound(amount, 0, type(uint256).max / 2);
+        
+        // Since this test creates its own token (not via factory), it still has ownership
         token.mint(address(this), amount);
 
         vm.expectRevert(RainbowSuperToken.Unauthorized.selector);

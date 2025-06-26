@@ -72,6 +72,10 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
 
         // Verify ownership has been renounced
         assertEq(token.owner(), address(0), "Token ownership should be renounced");
+        
+        // Verify no airdrop tokens in contract (since no merkle root)
+        assertEq(token.balanceOf(address(token)), 0);
+        
         vm.stopPrank();
     }
 
@@ -88,10 +92,18 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         assertEq(creator, creator1);
 
         // Check supply allocations
-        (uint16 creatorBaseBps,) = getCreatorAndAirdropBps();
+        (uint16 creatorBaseBps, uint16 airdropBps) = getCreatorAndAirdropBps();
         uint256 expectedCreatorAmount = (INITIAL_SUPPLY * creatorBaseBps) / 10_000;
+        uint256 expectedAirdropAmount = (INITIAL_SUPPLY * airdropBps) / 10_000;
 
         assertEq(token.balanceOf(address(creator1)), expectedCreatorAmount);
+        
+        // Verify airdrop tokens are held by the token contract
+        assertEq(token.balanceOf(address(token)), expectedAirdropAmount);
+        
+        // Verify total supply is fully minted at creation
+        assertEq(token.totalSupply(), INITIAL_SUPPLY);
+        
         vm.stopPrank();
     }
 
