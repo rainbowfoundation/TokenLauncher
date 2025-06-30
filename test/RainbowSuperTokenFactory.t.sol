@@ -64,7 +64,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         assertEq(token.symbol(), "TEST");
         assertEq(token.totalSupply(), INITIAL_SUPPLY);
 
-        (,,,, bool hasAirdrop,, address creator) = rainbowFactory.tokenFeeConfig(address(token));
+        (,, bool hasAirdrop,, address creator) = rainbowFactory.tokenFeeConfig(address(token));
         assertEq(creator, creator1);
         assertFalse(hasAirdrop);
 
@@ -88,17 +88,14 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         RainbowSuperToken token = rainbowFactory.launchRainbowSuperToken("Airdrop Token", "AIR", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, address(creator1));
 
         assertTrue(address(token) < address(weth), "Token address must be less than WETH");
-        (,,,, bool hasAirdrop,, address creator) = rainbowFactory.tokenFeeConfig(address(token));
+        (,, bool hasAirdrop,, address creator) = rainbowFactory.tokenFeeConfig(address(token));
         assertTrue(hasAirdrop);
         assertEq(creator, creator1);
 
         // Check supply allocations
-        (uint16 creatorBaseBps, uint16 airdropBps) = getCreatorAndAirdropBps();
-        uint256 expectedCreatorAmount = (INITIAL_SUPPLY * creatorBaseBps) / 10_000;
+        uint16 airdropBps = getCreatorAndAirdropBps();
         uint256 expectedAirdropAmount = (INITIAL_SUPPLY * airdropBps) / 10_000;
 
-        assertEq(token.balanceOf(address(creator1)), expectedCreatorAmount);
-        
         // Verify airdrop tokens are held by the token contract
         assertEq(token.balanceOf(address(token)), expectedAirdropAmount);
         
@@ -174,8 +171,6 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
 
         RainbowSuperTokenFactory.FeeConfig memory newConfig = RainbowSuperTokenFactory.FeeConfig({
             creatorLPFeeBps: 1500, // 15%
-            protocolBaseBps: 50, // 0.5%
-            creatorBaseBps: 30, // 0.3%
             airdropBps: 20, // 0.2%
             hasAirdrop: false,
             feeToken: address(weth),
@@ -193,7 +188,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
 
         assertTrue(address(token) < address(weth), "Token address must be less than WETH");
         // Verify new config was applied
-        (uint16 creatorLPFeeBps,,,,,,) = rainbowFactory.tokenFeeConfig(address(token));
+        (uint16 creatorLPFeeBps,,,,) = rainbowFactory.tokenFeeConfig(address(token));
         assertEq(creatorLPFeeBps, 1500);
         vm.stopPrank();
     }
@@ -230,7 +225,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         assertEq(token.symbol(), "TEST");
         assertEq(token.totalSupply(), INITIAL_SUPPLY);
 
-        (,,,, bool hasAirdrop,, address creator) = rainbowFactory.tokenFeeConfig(address(token));
+        (,, bool hasAirdrop,, address creator) = rainbowFactory.tokenFeeConfig(address(token));
         assertEq(creator, creator1);
         assertFalse(hasAirdrop);
 
@@ -402,9 +397,9 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
     }
 
     // Helper function to get creator and airdrop basis points
-    function getCreatorAndAirdropBps() internal view returns (uint16, uint16) {
-        (,, uint16 creatorBaseBps, uint16 airdropBps,,,) = rainbowFactory.defaultFeeConfig();
-        return (creatorBaseBps, airdropBps);
+    function getCreatorAndAirdropBps() internal view returns (uint16) {
+        (, uint16 airdropBps,,,) = rainbowFactory.defaultFeeConfig();
+        return (airdropBps);
     }
 
     // Add these tests to RainbowSuperTokenFactoryTest.sol
@@ -432,8 +427,6 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
 
         RainbowSuperTokenFactory.FeeConfig memory newConfig = RainbowSuperTokenFactory.FeeConfig({
             creatorLPFeeBps: 1500,
-            protocolBaseBps: 50,
-            creatorBaseBps: 30,
             airdropBps: 20,
             hasAirdrop: false,
             feeToken: address(usdc),
@@ -567,23 +560,6 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         vm.stopPrank();
     }
 
-    function testCheckOverTheRainbow() public {
-        MockERC20 usdc = new MockERC20("USD Coin", "USDC");
-
-        vm.startPrank(owner);
-        rainbowFactory.setNewPairToken(ERC20(address(usdc)));
-        vm.stopPrank();
-
-        vm.startPrank(creator1);
-
-        (bytes32 salt,) = findValidSalt(creator1, "Fee Token", "FEE", MERKLE_ROOT, INITIAL_SUPPLY);
-
-        // Launch token
-        RainbowSuperToken token = rainbowFactory.launchRainbowSuperToken("Fee Token", "FEE", MERKLE_ROOT, INITIAL_SUPPLY, 200, salt, creator1);
-        
-        assertEq(token.balanceOf(pot), (INITIAL_SUPPLY / 100) * 5);
-    }
-
     function testChangePot() public {
         vm.startPrank(user2);
         vm.expectRevert("UNAUTHORIZED");
@@ -630,7 +606,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         vm.startPrank(creator1);
         
         // Get airdrop allocation amount first to set realistic claim amounts
-        (, uint16 airdropBps) = getCreatorAndAirdropBps();
+        uint16 airdropBps = getCreatorAndAirdropBps();
         uint256 expectedAirdropAmount = (INITIAL_SUPPLY * airdropBps) / 10_000;
         
         // Create merkle tree for airdrop claims with realistic amounts
@@ -701,13 +677,11 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         );
         
         // Get all allocation amounts
-        (,uint16 protocolBaseBps, uint16 creatorBaseBps, uint16 airdropBps,,, ) = rainbowFactory.defaultFeeConfig();
+        (, uint16 airdropBps,,,) = rainbowFactory.defaultFeeConfig();
         
         // Calculate expected allocations
-        uint256 expectedCreatorAmount = (INITIAL_SUPPLY * creatorBaseBps) / 10_000;
-        uint256 expectedProtocolAmount = (INITIAL_SUPPLY * protocolBaseBps) / 10_000;
         uint256 expectedAirdropAmount = (INITIAL_SUPPLY * airdropBps) / 10_000;
-        uint256 expectedLpAmount = INITIAL_SUPPLY - expectedCreatorAmount - expectedProtocolAmount - expectedAirdropAmount;
+        uint256 expectedLpAmount = INITIAL_SUPPLY - expectedAirdropAmount;
         
         // Verify total supply equals expected amount
         assertEq(token.totalSupply(), INITIAL_SUPPLY, "Total supply should equal initial supply");
@@ -723,8 +697,6 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         assertTrue(positionId > 0, "Position should exist");
         
         // Verify allocations (creator, protocol, airdrop)
-        assertEq(creatorBalance, expectedCreatorAmount, "Creator allocation incorrect");
-        assertEq(protocolBalance, expectedProtocolAmount, "Protocol allocation incorrect");
         assertEq(airdropBalance, expectedAirdropAmount, "Airdrop allocation incorrect");
         
         // Verify no additional minting is possible (owner is address(0))

@@ -89,10 +89,6 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     struct FeeConfig {
         // Creator's share of LP fees (in basis points, max 10000)
         uint16 creatorLPFeeBps;
-        // Protocol's base fee from initial supply (in basis points)
-        uint16 protocolBaseBps;
-        // Creator's fee from initial supply (in basis points)
-        uint16 creatorBaseBps;
         // Airdrop allocation from initial supply (in basis points)
         uint16 airdropBps;
         // Whether this token has airdrop enabled
@@ -160,8 +156,6 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @dev Default fee configuration
     FeeConfig public defaultFeeConfig = FeeConfig({
         creatorLPFeeBps: 5000, // 50% of LP fees to creator (50% implicit Protocol LP fee)
-        protocolBaseBps: 500, // 5.00% to protocol if no airdrop
-        creatorBaseBps: 50, // 0.50% to creator with airdrop
         airdropBps: 50, // 0.50% to airdrop
         hasAirdrop: false,
         feeToken: address(WETH),
@@ -223,7 +217,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @param newConfig The new fee configuration to set
     function setDefaultFeeConfig(FeeConfig calldata newConfig) external onlyOwner {
         if (newConfig.creatorLPFeeBps > 10_000) revert InvalidFeeSplit();
-        if (newConfig.protocolBaseBps + newConfig.creatorBaseBps + newConfig.airdropBps > 10_000) {
+        if (newConfig.airdropBps > 10_000) {
             revert InvalidSupplyAllocation();
         }
         defaultFeeConfig = newConfig;
@@ -346,7 +340,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
 
         bool hasAirdrop = merkleroot != bytes32(0);
 
-        (uint256 lpSupply, uint256 creatorAmount, uint256 protocolAmount, uint256 airdropAmount) = calculateSupplyAllocation(supply, hasAirdrop);
+        (uint256 lpSupply, uint256 airdropAmount) = calculateSupplyAllocation(supply, hasAirdrop);
 
         uint256 id;
         assembly {
@@ -366,11 +360,6 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
             revert IncorrectSalt();
         }
 
-        newToken.mint(creator, creatorAmount);
-
-        // 🌈 Over the Rainbow Token Supply
-        newToken.mint(overTheRainbowPot, protocolAmount);
-
         // Mint airdrop allocation to the token contract itself
         if (airdropAmount > 0) {
             newToken.mint(address(newToken), airdropAmount);
@@ -379,8 +368,6 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         // Set up fee configuration
         FeeConfig memory config = FeeConfig({
             creatorLPFeeBps: defaultFeeConfig.creatorLPFeeBps,
-            protocolBaseBps: defaultFeeConfig.protocolBaseBps,
-            creatorBaseBps: defaultFeeConfig.creatorBaseBps,
             airdropBps: defaultFeeConfig.airdropBps,
             hasAirdrop: hasAirdrop,
             feeToken: address(defaultPairToken),
@@ -487,8 +474,6 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @param hasAirdrop Whether the token has airdrop enabled
     ///
     /// @return lpAmount The amount of tokens allocated to LP
-    /// @return creatorAmount The amount of tokens allocated to the creator
-    /// @return protocolAmount The amount of tokens allocated to Rainbow
     /// @return airdropAmount The amount of tokens allocated to airdrop
     function calculateSupplyAllocation(
         uint256 totalSupply,
@@ -496,19 +481,14 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     )
         internal
         view
-        returns (uint256 lpAmount, uint256 creatorAmount, uint256 protocolAmount, uint256 airdropAmount)
+        returns (uint256 lpAmount, uint256 airdropAmount)
     {
         if (hasAirdrop) {
-            creatorAmount = (totalSupply * defaultFeeConfig.creatorBaseBps) / 10_000;
-            protocolAmount = (totalSupply * defaultFeeConfig.protocolBaseBps) / 10_000;
             airdropAmount = (totalSupply * defaultFeeConfig.airdropBps) / 10_000;
         } else {
-            creatorAmount = (totalSupply * defaultFeeConfig.creatorBaseBps) / 10_000;
-            protocolAmount = (totalSupply * defaultFeeConfig.protocolBaseBps) / 10_000;
-            creatorAmount += (totalSupply * defaultFeeConfig.airdropBps) / 10_000; // Add airdrop amount to creator supply
             airdropAmount = 0;
         }
-        lpAmount = totalSupply - creatorAmount - airdropAmount - protocolAmount;
+        lpAmount = totalSupply - airdropAmount;
     }
 
     /// @notice Get the unclaimed fees for a token
@@ -694,7 +674,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         returns (address token)
     {
         bool hasAirdrop = merkleroot != bytes32(0);
-        (,,, uint256 airdropAmount) = calculateSupplyAllocation(supply, hasAirdrop);
+        (, uint256 airdropAmount) = calculateSupplyAllocation(supply, hasAirdrop);
 
         uint256 id;
         assembly {
