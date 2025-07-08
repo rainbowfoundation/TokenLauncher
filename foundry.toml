@@ -9,17 +9,12 @@ optimizer_runs = 1000
 
 via_ir=true
 
-auto_detect_solc = true
-
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
 remappings = [
   "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts",
     "@uniswap/v3-core/=lib/v3-core/",
     "@uniswap/v3-periphery/=lib/v3-periphery/",
-    "solmate/src/=lib/solmate/src/",
     "solmate/=lib/solmate/src/",
-    "permit2/=lib/permit2/src/",
-    "universal-router/=lib/universal-router/contracts/"
 ]
 
 
