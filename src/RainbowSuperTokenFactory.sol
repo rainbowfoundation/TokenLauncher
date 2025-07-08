@@ -9,16 +9,18 @@ import { SafeTransferLib } from "lib/solmate/src/utils/SafeTransferLib.sol";
 import { RainbowSuperToken } from "src/RainbowSuperToken.sol";
 import { FixedPointMathLib } from "lib/solmate/src/utils/FixedPointMathLib.sol";
 
-import { IWETH9 } from "vendor/v3-periphery/interfaces/external/IWETH9.sol";
+import { IWETH9 } from "lib/v4-periphery/src/interfaces/external/IWETH9.sol";
 
-import { IPoolManager } from "lib/v4-core/src/interfaces/IPoolManager.sol";
+import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { IPositionManager } from "lib/v4-periphery/src/interfaces/IPositionManager.sol";
-import { PoolKey } from "lib/v4-core/src/types/PoolKey.sol";
-import { PoolId, PoolIdLibrary } from "lib/v4-core/src/types/PoolId.sol";
-import { Currency, CurrencyLibrary } from "lib/v4-core/src/types/Currency.sol";
+import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
+import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
+import { Currency, CurrencyLibrary } from "@uniswap/v4-core/src/types/Currency.sol";
 import { Actions } from "lib/v4-periphery/src/libraries/Actions.sol";
-import { IHooks } from "lib/v4-core/src/interfaces/IHooks.sol";
-import { TickMath } from "lib/v4-core/src/libraries/TickMath.sol";
+import { IHooks } from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import { IV4Router } from "lib/v4-periphery/src/interfaces/IV4Router.sol";
+import { Commands } from "lib/universal-router/contracts/libraries/Commands.sol";
 
 /// @title RainbowSuperTokenFactory
 /// @author CopyPaste - for Rainbow with love <3
@@ -118,6 +120,9 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @dev The V4 Position Manager contract
     IPositionManager public immutable positionManager;
 
+    /// @dev The V4 Router contract
+    address public immutable router;
+
     /// @dev The canonical WETH token contract
     IWETH9 public immutable WETH;
 
@@ -154,10 +159,10 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @dev 🌈
     address public overTheRainbowPot;
 
-    /// @dev The Uniswap V3 Pool fee
+    /// @dev The Uniswap Pool fee
     uint24 public POOL_FEE = 10_000;
 
-    /// @dev The Uniswap V3 Tick spacing
+    /// @dev The Uniswap Tick spacing
     int24 public TICK_SPACING = 200;
 
     /// @dev Default fee configuration
@@ -177,14 +182,25 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
 
     /// @param _poolManager The address of the V4 Pool Manager contract
     /// @param _positionManager The address of the V4 Position Manager contract
+    /// @param _router The address of the V4 Router contract
     /// @param _overTheRainbow The address of the Over the Rainbow Pot
     /// @param _weth The address of the WETH contract
     /// @param _baseTokenURI The base URI for all tokens
-    constructor(address _poolManager, address _positionManager, address _overTheRainbow, address _weth, string memory _baseTokenURI) Owned(msg.sender) {
+    constructor(
+        address _poolManager,
+        address _positionManager,
+        address _router,
+        address _overTheRainbow,
+        address _weth,
+        string memory _baseTokenURI
+    )
+        Owned(msg.sender)
+    {
         // Uniswap v4 contracts
         WETH = IWETH9(payable(_weth));
         poolManager = IPoolManager(_poolManager);
         positionManager = IPositionManager(_positionManager);
+        router = _router;
         baseTokenURI = _baseTokenURI;
 
         // Over the Rainbow Pot
@@ -285,41 +301,63 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
             if (msg.value != amountIn) revert InsufficientFunds();
             WETH.deposit{ value: msg.value }();
         } else {
-            if (msg.value != 0) revert InsufficientFunds(); // No ether should be sent if not WETH
+            if (msg.value != 0) revert InsufficientFunds();
             defaultPairToken.safeTransferFrom(msg.sender, address(this), amountIn);
         }
 
         RainbowSuperToken token = launchRainbowSuperToken(name, symbol, merkleroot, supply, initialTick, salt, creator);
 
+        // First, approve Permit2 if not already done
+        if (defaultPairToken.allowance(address(this), address(permit2)) < amountIn) {
+            defaultPairToken.approve(address(permit2), type(uint256).max);
+        }
+
+        // Then use Permit2 to approve the router
+        IPermit2(permit2).approve(
+            address(defaultPairToken),
+            address(router),
+            uint160(amountIn),
+            uint48(block.timestamp + 3600) // 1 hour expiration
+        );
+
+        // Get the pool key
         PoolKey memory poolKey = tokenPoolKeys[address(token)];
 
-        bytes memory actions = abi.encodePacked(uint8(Actions.SETTLE), uint8(Actions.SWAP_EXACT_IN_SINGLE), uint8(Actions.TAKE_ALL));
+        // Encode the Universal Router command for V4_SWAP
+        bytes memory commands = abi.encodePacked(uint8(Commands.V4_SWAP));
 
-        bytes[] memory actionParams = new bytes[](3);
+        // Encode V4Router actions
+        bytes memory actions = abi.encodePacked(uint8(Actions.SWAP_EXACT_IN_SINGLE), uint8(Actions.SETTLE_ALL), uint8(Actions.TAKE_ALL));
 
-        // SETTLE the input token
-        actionParams[0] = abi.encode(
-            poolKey.currency1, // defaultPairToken is currency1
-            amountIn,
-            true // payerIsUser
+        // Prepare parameters for each action
+        bytes[] memory params = new bytes[](3);
+
+        // SWAP_EXACT_IN_SINGLE parameters
+        params[0] = abi.encode(
+            IV4Router.ExactInputSingleParams({
+                poolKey: poolKey,
+                zeroForOne: false, // Swapping currency1 (defaultPairToken) for currency0 (new token)
+                amountIn: uint128(amountIn),
+                amountOutMinimum: 0, // TODO: Add slippage protection in production
+                hookData: bytes("")
+            })
         );
 
-        // SWAP parameters
-        actionParams[1] = abi.encode(
-            poolKey,
-            false, // zeroForOne = false (currency1 -> currency0)
-            int256(amountIn), // amountSpecified (positive = exact input)
-            TickMath.MIN_SQRT_PRICE + 1, // sqrtPriceLimitX96
-            bytes("") // hookData
-        );
+        // SETTLE_ALL parameters (input currency and amount)
+        params[1] = abi.encode(poolKey.currency1, uint256(amountIn));
 
-        // TAKE_ALL output tokens
-        actionParams[2] = abi.encode(
-            poolKey.currency0, // take the new token
-            creator // recipient
-        );
+        // TAKE_ALL parameters (output currency and minimum amount)
+        params[2] = abi.encode(poolKey.currency0, uint256(0)); // 0 means take all
 
-        positionManager.modifyLiquidities(abi.encode(actions, actionParams), block.timestamp);
+        // Combine actions and params into inputs array
+        bytes[] memory inputs = new bytes[](1);
+        inputs[0] = abi.encode(actions, params);
+
+        // Execute the swap through Universal Router
+        uint256 deadline = block.timestamp + 300; // 5 minutes
+        router.execute(commands, inputs, deadline);
+
+        // The output tokens will be sent directly to the creator as specified in TAKE_ALL
 
         return token;
     }
@@ -426,35 +464,28 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
 
         newToken.approve(address(positionManager), lpSupply);
 
-        // Prepare actions for position manager
-        bytes memory actions = abi.encodePacked(
-            uint8(Actions.MINT_POSITION),
-            uint8(Actions.SETTLE) // Only settle token0 since amount1=0
-        );
-
+        // Settle tokens to credit the factory contract with the PoolManager
+        bytes memory actions = abi.encodePacked(uint8(Actions.SETTLE), uint8(Actions.MINT_POSITION_FROM_DELTAS));
         bytes[] memory actionParams = new bytes[](2);
 
-        // MINT_POSITION parameters
+        // SETTLE lpSupply of the new token
         actionParams[0] = abi.encode(
-            poolKey,
-            initialTick, // tickLower
-            maxUsableTick(TICK_SPACING), // tickUpper
-            lpSupply, // liquidity (in V4 you specify liquidity directly)
-            type(uint256).max, // amount0Max
-            type(uint256).max, // amount1Max
-            address(this), // owner (factory holds the position)
-            block.timestamp, // deadline
-            bytes("") // hookData (empty since no hooks)
+            currency0, // The new RainbowSuperToken
+            lpSupply,
+            false // payer is the contract, not the user
         );
 
-        // SETTLE parameters (only settling token0)
+        // MINT_POSITION_FROM_DELTAS
         actionParams[1] = abi.encode(
-            currency0, // currency to settle
-            lpSupply, // amount
-            false // payerIsUser (false = contract pays)
+            poolKey,
+            initialTick,
+            maxUsableTick(TICK_SPACING),
+            uint128(lpSupply), // amount0Max
+            uint128(0), // amount1Max
+            address(this), // owner of the position
+            bytes("") // hookData
         );
 
-        // Execute position creation
         positionManager.modifyLiquidities(abi.encode(actions, actionParams), block.timestamp);
 
         // Get the minted position ID
