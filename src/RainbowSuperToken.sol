@@ -38,6 +38,7 @@ contract RainbowSuperToken is ERC20, Owned {
                               CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
     /// @dev The merkle root to be used for claims
+
     bytes32 public merkleRoot;
 
     /// @dev The total amount allocated for airdrops
@@ -118,7 +119,7 @@ contract RainbowSuperToken is ERC20, Owned {
 
         // Use SafeTransferLib for secure transfer
         ERC20(address(this)).safeTransfer(recipient, amount);
-        
+
         emit Claim(recipient, amount);
     }
 

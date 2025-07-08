@@ -28,7 +28,7 @@ contract ForkRainbowTest is Test {
     address public owner = makeAddr("owner");
     address public creator = makeAddr("creator");
     address public user = makeAddr("user");
-    address public pot = makeAddr("pot"); 
+    address public pot = makeAddr("pot");
 
     // Constants for testing
     uint256 constant INITIAL_SUPPLY = 1_000_000 ether; // 1 million tokens
@@ -57,8 +57,9 @@ contract ForkRainbowTest is Test {
 
         // Deploy Rainbow factory
         vm.startPrank(owner);
-        rainbowFactory =
-            new RainbowSuperTokenFactory(UNISWAP_V3_FACTORY, address(pot), UNISWAP_POSITION_MANAGER, UNISWAP_SWAP_ROUTER, WETH_ADDRESS, "https://rainbow.me/tokens/");
+        rainbowFactory = new RainbowSuperTokenFactory(
+            UNISWAP_V3_FACTORY, address(pot), UNISWAP_POSITION_MANAGER, UNISWAP_SWAP_ROUTER, WETH_ADDRESS, "https://rainbow.me/tokens/"
+        );
         vm.stopPrank();
     }
 
