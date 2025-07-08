@@ -7,16 +7,18 @@ import { ERC20 } from "lib/solmate/src/tokens/ERC20.sol";
 import { SafeTransferLib } from "lib/solmate/src/utils/SafeTransferLib.sol";
 
 import { RainbowSuperToken } from "src/RainbowSuperToken.sol";
-
-import { TickMath } from "vendor/v3-core/libraries/TickMath.sol";
 import { FixedPointMathLib } from "lib/solmate/src/utils/FixedPointMathLib.sol";
 
-import { ISwapRouter02 } from "vendor/swap-router/interfaces/ISwapRouter02.sol";
-
 import { IWETH9 } from "vendor/v3-periphery/interfaces/external/IWETH9.sol";
-import { IUniswapV3Pool } from "vendor/v3-core/interfaces/IUniswapV3Pool.sol";
-import { IUniswapV3Factory } from "vendor/v3-core/interfaces/IUniswapV3Factory.sol";
-import { INonfungiblePositionManager } from "vendor/v3-periphery/interfaces/INonfungiblePositionManager.sol";
+
+import { IPoolManager } from "lib/v4-core/src/interfaces/IPoolManager.sol";
+import { IPositionManager } from "lib/v4-periphery/src/interfaces/IPositionManager.sol";
+import { PoolKey } from "lib/v4-core/src/types/PoolKey.sol";
+import { PoolId, PoolIdLibrary } from "lib/v4-core/src/types/PoolId.sol";
+import { Currency, CurrencyLibrary } from "lib/v4-core/src/types/Currency.sol";
+import { Actions } from "lib/v4-periphery/src/libraries/Actions.sol";
+import { IHooks } from "lib/v4-core/src/interfaces/IHooks.sol";
+import { TickMath } from "lib/v4-core/src/libraries/TickMath.sol";
 
 /// @title RainbowSuperTokenFactory
 /// @author CopyPaste - for Rainbow with love <3
@@ -26,6 +28,8 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     using TickMath for int24;
     using SafeTransferLib for ERC20;
     using FixedPointMathLib for uint256;
+    using PoolIdLibrary for PoolKey;
+    using CurrencyLibrary for Currency;
 
     /*//////////////////////////////////////////////////////////////
                                  ERRORS
@@ -36,7 +40,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     error ZeroSupply();
     error BannedName();
     error BannedTicker();
-    error NotUniswapPositionManager();
+    error NotPositionManager();
     error InvalidFeeSplit();
     error InvalidSupplyAllocation();
     error NoFeesToClaim();
@@ -108,20 +112,17 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
                                 STORAGE
     //////////////////////////////////////////////////////////////*/
 
-    /// @dev The canonical Uniswap V3 factory contract
-    IUniswapV3Factory public immutable uniswapV3Factory;
+    /// @dev The V4 Pool Manager contract
+    IPoolManager public immutable poolManager;
+
+    /// @dev The V4 Position Manager contract
+    IPositionManager public immutable positionManager;
 
     /// @dev The canonical WETH token contract
     IWETH9 public immutable WETH;
 
     /// @dev The default pair token
     ERC20 public defaultPairToken;
-
-    /// @dev The Nonfungible Position Manager contract
-    INonfungiblePositionManager public immutable nonfungiblePositionManager;
-
-    /// @dev The Uniswap V3 SwapRouter contract
-    ISwapRouter02 public immutable swapRouter;
 
     /// @dev The base URI for all tokens
     string public baseTokenURI;
@@ -137,6 +138,12 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
 
     /// @dev The mapping from token address to its liquidity position ID
     mapping(address => uint256) public tokenPositionIds;
+
+    /// @dev The mapping from token address to its pool ID
+    mapping(address => PoolId) public tokenPoolIds;
+
+    /// @dev The mapping from token address to its pool key
+    mapping(address => PoolKey) public tokenPoolKeys;
 
     /// @dev The mapping from tokenId to creator's unclaimed fees
     mapping(uint256 => UnclaimedFees) public creatorUnclaimedFees;
@@ -168,29 +175,23 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
                               CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
 
-    /// @param _uniswapV3Factory The address of the Uniswap V3 factory contract
-    /// @param _nonfungiblePositionManager The address of the Uniswap V3 Nonfungible Position Manager contract
-    /// @param _swapRouter The address of the Uniswap V3 SwapRouter contract
+    /// @param _poolManager The address of the V4 Pool Manager contract
+    /// @param _positionManager The address of the V4 Position Manager contract
+    /// @param _overTheRainbow The address of the Over the Rainbow Pot
     /// @param _weth The address of the WETH contract
     /// @param _baseTokenURI The base URI for all tokens
-    constructor(
-        address _uniswapV3Factory,
-        address _overTheRainbow,
-        address _nonfungiblePositionManager,
-        address _swapRouter,
-        address _weth,
-        string memory _baseTokenURI
-    )
-        Owned(msg.sender)
-    {
+    constructor(address _poolManager, address _positionManager, address _overTheRainbow, address _weth, string memory _baseTokenURI) Owned(msg.sender) {
+        // Uniswap v4 contracts
         WETH = IWETH9(payable(_weth));
-        swapRouter = ISwapRouter02(_swapRouter);
-        uniswapV3Factory = IUniswapV3Factory(_uniswapV3Factory);
-        nonfungiblePositionManager = INonfungiblePositionManager(_nonfungiblePositionManager);
+        poolManager = IPoolManager(_poolManager);
+        positionManager = IPositionManager(_positionManager);
         baseTokenURI = _baseTokenURI;
+
+        // Over the Rainbow Pot
         overTheRainbowPot = _overTheRainbow;
 
-        WETH.approve(_swapRouter, type(uint256).max);
+        // Approve WETH for the pool manager
+        WETH.approve(address(positionManager), type(uint256).max);
         defaultPairToken = ERC20(_weth);
     }
 
@@ -208,7 +209,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @param newPairToken The new pair token to set
     function setNewPairToken(ERC20 newPairToken) public onlyOwner {
         defaultPairToken = newPairToken;
-        defaultPairToken.approve(address(swapRouter), type(uint256).max);
+        defaultPairToken.approve(address(poolManager), type(uint256).max);
 
         emit NewDefaultPairToken(address(newPairToken));
     }
@@ -246,9 +247,10 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
 
     /// @notice Set the new pool fee and tick spacing
     /// @param newPoolFee The new pool fee to set
-    function setNewTickSpacing(uint24 newPoolFee) external onlyOwner {
+    /// @param newTickSpacing The new tick spacing to set
+    function setNewTickSpacing(uint24 newPoolFee, int24 newTickSpacing) external onlyOwner {
         POOL_FEE = newPoolFee;
-        TICK_SPACING = uniswapV3Factory.feeAmountTickSpacing(newPoolFee);
+        TICK_SPACING = newTickSpacing;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -289,17 +291,35 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
 
         RainbowSuperToken token = launchRainbowSuperToken(name, symbol, merkleroot, supply, initialTick, salt, creator);
 
-        ISwapRouter02.ExactInputSingleParams memory swapParamsToken = ISwapRouter02.ExactInputSingleParams({
-            tokenIn: address(defaultPairToken), // The token we are exchanging from
-            tokenOut: address(token), // The token we are exchanging to
-            fee: POOL_FEE, // The pool fee
-            recipient: creator, // The recipient address
-            amountIn: amountIn, // The amount of tokens to swap
-            amountOutMinimum: 0, // Minimum amount to receive
-            sqrtPriceLimitX96: 0 // No price limit
-         });
+        PoolKey memory poolKey = tokenPoolKeys[address(token)];
 
-        swapRouter.exactInputSingle(swapParamsToken);
+        bytes memory actions = abi.encodePacked(uint8(Actions.SETTLE), uint8(Actions.SWAP_EXACT_IN_SINGLE), uint8(Actions.TAKE_ALL));
+
+        bytes[] memory actionParams = new bytes[](3);
+
+        // SETTLE the input token
+        actionParams[0] = abi.encode(
+            poolKey.currency1, // defaultPairToken is currency1
+            amountIn,
+            true // payerIsUser
+        );
+
+        // SWAP parameters
+        actionParams[1] = abi.encode(
+            poolKey,
+            false, // zeroForOne = false (currency1 -> currency0)
+            int256(amountIn), // amountSpecified (positive = exact input)
+            TickMath.MIN_SQRT_PRICE + 1, // sqrtPriceLimitX96
+            bytes("") // hookData
+        );
+
+        // TAKE_ALL output tokens
+        actionParams[2] = abi.encode(
+            poolKey.currency0, // take the new token
+            creator // recipient
+        );
+
+        positionManager.modifyLiquidities(abi.encode(actions, actionParams), block.timestamp);
 
         return token;
     }
@@ -375,34 +395,73 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         });
         tokenFeeConfig[address(newToken)] = config;
 
-        IUniswapV3Pool pool = IUniswapV3Pool(uniswapV3Factory.createPool(address(newToken), address(_pairToken), POOL_FEE));
+        // Create Currency wrappers (V4 uses Currency type)
+        Currency currency0 = Currency.wrap(address(newToken));
+        Currency currency1 = Currency.wrap(address(_pairToken));
 
-        uint160 initialSqrtRatio = initialTick.getSqrtRatioAtTick();
-        pool.initialize(initialSqrtRatio);
+        // V4 REQUIRES currency0 < currency1 - your salt check already ensures this!
+        if (currency0 > currency1) {
+            revert IncorrectSalt();
+        }
+
+        // Create PoolKey
+        PoolKey memory poolKey = PoolKey({
+            currency0: currency0,
+            currency1: currency1,
+            fee: POOL_FEE,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(0)) // No hooks as requested
+         });
+
+        // Initialize pool
+        uint160 sqrtPriceX96 = TickMath.getSqrtPriceAtTick(initialTick);
+        poolManager.initialize(poolKey, sqrtPriceX96);
+
+        // Store pool information
+        PoolId poolId = poolKey.toId();
+        tokenPoolIds[address(newToken)] = poolId;
+        tokenPoolKeys[address(newToken)] = poolKey;
 
         newToken.mint(address(this), lpSupply);
 
-        // Provide initial liquidity
-        INonfungiblePositionManager.MintParams memory params = INonfungiblePositionManager.MintParams({
-            token0: address(newToken),
-            token1: address(_pairToken),
-            fee: POOL_FEE,
-            tickLower: initialTick,
-            tickUpper: maxUsableTick(TICK_SPACING),
-            amount0Desired: lpSupply,
-            amount1Desired: 0,
-            amount0Min: 0,
-            amount1Min: 0,
-            recipient: address(this),
-            deadline: block.timestamp
-        });
+        newToken.approve(address(positionManager), lpSupply);
 
-        newToken.approve(address(nonfungiblePositionManager), lpSupply);
-        (uint256 tokenId,,,) = nonfungiblePositionManager.mint(params);
+        // Prepare actions for position manager
+        bytes memory actions = abi.encodePacked(
+            uint8(Actions.MINT_POSITION),
+            uint8(Actions.SETTLE) // Only settle token0 since amount1=0
+        );
 
-        // Store the position ID
-        tokenPositionIds[address(newToken)] = tokenId;
+        bytes[] memory actionParams = new bytes[](2);
 
+        // MINT_POSITION parameters
+        actionParams[0] = abi.encode(
+            poolKey,
+            initialTick, // tickLower
+            maxUsableTick(TICK_SPACING), // tickUpper
+            lpSupply, // liquidity (in V4 you specify liquidity directly)
+            type(uint256).max, // amount0Max
+            type(uint256).max, // amount1Max
+            address(this), // owner (factory holds the position)
+            block.timestamp, // deadline
+            bytes("") // hookData (empty since no hooks)
+        );
+
+        // SETTLE parameters (only settling token0)
+        actionParams[1] = abi.encode(
+            currency0, // currency to settle
+            lpSupply, // amount
+            false // payerIsUser (false = contract pays)
+        );
+
+        // Execute position creation
+        positionManager.modifyLiquidities(abi.encode(actions, actionParams), block.timestamp);
+
+        // Get the minted position ID
+        uint256 positionTokenId = positionManager.nextTokenId() - 1;
+        tokenPositionIds[address(newToken)] = positionTokenId;
+
+        // Emit event
         emit RainbowSuperTokenCreated(address(newToken), creator, msg.sender, tokenURI);
 
         // Renounce ownership to make the token immutable
@@ -475,14 +534,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     ///
     /// @return lpAmount The amount of tokens allocated to LP
     /// @return airdropAmount The amount of tokens allocated to airdrop
-    function calculateSupplyAllocation(
-        uint256 totalSupply,
-        bool hasAirdrop
-    )
-        internal
-        view
-        returns (uint256 lpAmount, uint256 airdropAmount)
-    {
+    function calculateSupplyAllocation(uint256 totalSupply, bool hasAirdrop) internal view returns (uint256 lpAmount, uint256 airdropAmount) {
         if (hasAirdrop) {
             airdropAmount = (totalSupply * defaultFeeConfig.airdropBps) / 10_000;
         } else {
@@ -498,12 +550,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @return creatorFee1 The unclaimed fees for the creator
     /// @return protocolFee0 The unclaimed fees for the protocol
     /// @return protocolFee1 The unclaimed fees for the protocol
-    function getUnclaimedFees(address token) external view returns (
-        uint256 creatorFee0,
-        uint256 creatorFee1,
-        uint256 protocolFee0,
-        uint256 protocolFee1
-    ) {
+    function getUnclaimedFees(address token) external view returns (uint256 creatorFee0, uint256 creatorFee1, uint256 protocolFee0, uint256 protocolFee1) {
         // Get the token ID
         uint256 tokenId = tokenPositionIds[token];
         if (tokenId == 0) revert InvalidToken();
@@ -520,15 +567,46 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         uint256 tokenId = tokenPositionIds[token];
         if (tokenId == 0) revert InvalidToken();
 
-        // Get total fees
-        (uint256 totalFee0, uint256 totalFee1) = nonfungiblePositionManager.collect(
-            INonfungiblePositionManager.CollectParams({
-                tokenId: tokenId,
-                recipient: address(this),
-                amount0Max: type(uint128).max,
-                amount1Max: type(uint128).max
-            })
+        PoolKey memory poolKey = tokenPoolKeys[token];
+
+        // Get balances before collecting fees
+        uint256 balance0Before =
+            Currency.unwrap(poolKey.currency0) == address(0) ? address(this).balance : ERC20(Currency.unwrap(poolKey.currency0)).balanceOf(address(this));
+        uint256 balance1Before =
+            Currency.unwrap(poolKey.currency1) == address(0) ? address(this).balance : ERC20(Currency.unwrap(poolKey.currency1)).balanceOf(address(this));
+
+        // In V4, fees are collected by modifying liquidity by 0
+        bytes memory actions = abi.encodePacked(uint8(Actions.DECREASE_LIQUIDITY), uint8(Actions.TAKE_PAIR));
+
+        bytes[] memory actionParams = new bytes[](2);
+
+        // DECREASE_LIQUIDITY by 0 to trigger fee collection
+        actionParams[0] = abi.encode(
+            tokenId, // position tokenId
+            0, // liquidityDelta = 0 (just collect fees)
+            0, // amount0Min
+            0, // amount1Min
+            bytes("") // hookData (empty since no hooks)
         );
+
+        // TAKE_PAIR to receive both tokens
+        actionParams[1] = abi.encode(
+            poolKey.currency0,
+            poolKey.currency1,
+            address(this) // recipient
+        );
+
+        // Execute fee collection through position manager
+        positionManager.modifyLiquidities(abi.encode(actions, actionParams), block.timestamp);
+
+        // Calculate collected amounts from balance changes
+        uint256 balance0After =
+            Currency.unwrap(poolKey.currency0) == address(0) ? address(this).balance : ERC20(Currency.unwrap(poolKey.currency0)).balanceOf(address(this));
+        uint256 balance1After =
+            Currency.unwrap(poolKey.currency1) == address(0) ? address(this).balance : ERC20(Currency.unwrap(poolKey.currency1)).balanceOf(address(this));
+
+        uint256 totalFee0 = balance0After - balance0Before;
+        uint256 totalFee1 = balance1After - balance1Before;
 
         // Split fees according to configuration
         FeeConfig memory config = tokenFeeConfig[token];
@@ -581,7 +659,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @param recipient The recipient of the fees
     function claimProtocolFees(address token, address recipient) external onlyOwner {
         collectFees(token);
-        
+
         uint256 tokenId = tokenPositionIds[token];
 
         UnclaimedFees memory fees = protocolUnclaimedFees[tokenId];
@@ -612,8 +690,8 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     //////////////////////////////////////////////////////////////*/
 
     function onERC721Received(address, address, uint256, bytes calldata) external virtual override returns (bytes4) {
-        if (msg.sender != address(nonfungiblePositionManager)) {
-            revert NotUniswapPositionManager();
+        if (msg.sender != address(positionManager)) {
+            revert NotPositionManager();
         }
 
         return ERC721TokenReceiver.onERC721Received.selector;
