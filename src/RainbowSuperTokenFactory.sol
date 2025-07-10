@@ -19,8 +19,12 @@ import { Currency, CurrencyLibrary } from "@uniswap/v4-core/src/types/Currency.s
 import { Actions } from "lib/v4-periphery/src/libraries/Actions.sol";
 import { IHooks } from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
+
+import { IPermit2 } from "permit2/src/interfaces/IPermit2.sol";
+import { IUniversalRouter } from "vendor/universal-router/IUniversalRouter.sol";
+import { Commands } from "vendor/universal-router/Commands.sol";
 import { IV4Router } from "lib/v4-periphery/src/interfaces/IV4Router.sol";
-import { Commands } from "lib/universal-router/contracts/libraries/Commands.sol";
+
 
 /// @title RainbowSuperTokenFactory
 /// @author CopyPaste - for Rainbow with love <3
@@ -121,7 +125,10 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     IPositionManager public immutable positionManager;
 
     /// @dev The V4 Router contract
-    address public immutable router;
+    IUniversalRouter public immutable router;
+
+    /// @dev The Permit2 contract
+    address public immutable permit2;
 
     /// @dev The canonical WETH token contract
     IWETH9 public immutable WETH;
@@ -200,7 +207,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         WETH = IWETH9(payable(_weth));
         poolManager = IPoolManager(_poolManager);
         positionManager = IPositionManager(_positionManager);
-        router = _router;
+        router = IUniversalRouter(_router);
         baseTokenURI = _baseTokenURI;
 
         // Over the Rainbow Pot
@@ -324,7 +331,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         PoolKey memory poolKey = tokenPoolKeys[address(token)];
 
         // Encode the Universal Router command for V4_SWAP
-        bytes memory commands = abi.encodePacked(uint8(Commands.V4_SWAP));
+        bytes memory commands = abi.encodePacked(uint8(0x10));
 
         // Encode V4Router actions
         bytes memory actions = abi.encodePacked(uint8(Actions.SWAP_EXACT_IN_SINGLE), uint8(Actions.SETTLE_ALL), uint8(Actions.TAKE_ALL));
