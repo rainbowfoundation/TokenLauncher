@@ -25,7 +25,6 @@ import { IUniversalRouter } from "vendor/universal-router/IUniversalRouter.sol";
 import { Commands } from "vendor/universal-router/Commands.sol";
 import { IV4Router } from "lib/v4-periphery/src/interfaces/IV4Router.sol";
 
-
 /// @title RainbowSuperTokenFactory
 /// @author CopyPaste - for Rainbow with love <3
 /// @notice A factory contract for creating RainbowSuperTokens and managing their liquidity positions.
@@ -173,13 +172,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     int24 public TICK_SPACING = 200;
 
     /// @dev Default fee configuration
-    FeeConfig public defaultFeeConfig = FeeConfig({
-        creatorLPFeeBps: 5000, // 50% of LP fees to creator (50% implicit Protocol LP fee)
-        airdropBps: 50, // 0.50% to airdrop
-        hasAirdrop: false,
-        feeToken: address(WETH),
-        creator: address(0)
-    });
+    FeeConfig public defaultFeeConfig;
 
     bytes32 public constant RainbowSuperTokenContractCodeHash = keccak256(type(RainbowSuperToken).creationCode);
 
@@ -197,6 +190,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         address _poolManager,
         address _positionManager,
         address _router,
+        address _permit2,
         address _overTheRainbow,
         address _weth,
         string memory _baseTokenURI
@@ -208,6 +202,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         poolManager = IPoolManager(_poolManager);
         positionManager = IPositionManager(_positionManager);
         router = IUniversalRouter(_router);
+        permit2 = _permit2;
         baseTokenURI = _baseTokenURI;
 
         // Over the Rainbow Pot
@@ -216,6 +211,15 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         // Approve WETH for the pool manager
         WETH.approve(address(positionManager), type(uint256).max);
         defaultPairToken = ERC20(_weth);
+
+        // Set default fee configuration
+        defaultFeeConfig = FeeConfig({
+            creatorLPFeeBps: 5000, // 50% of LP fees to creator (50% implicit Protocol LP fee)
+            airdropBps: 50, // 0.50% to airdrop
+            hasAirdrop: false,
+            feeToken: address(WETH),
+            creator: address(0)
+        });
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -232,7 +236,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
     /// @param newPairToken The new pair token to set
     function setNewPairToken(ERC20 newPairToken) public onlyOwner {
         defaultPairToken = newPairToken;
-        defaultPairToken.approve(address(poolManager), type(uint256).max);
+        defaultPairToken.approve(address(positionManager), type(uint256).max);
 
         emit NewDefaultPairToken(address(newPairToken));
     }
@@ -331,7 +335,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         PoolKey memory poolKey = tokenPoolKeys[address(token)];
 
         // Encode the Universal Router command for V4_SWAP
-        bytes memory commands = abi.encodePacked(uint8(0x10));
+        bytes memory commands = abi.encodePacked(uint8(Commands.V4_SWAP));
 
         // Encode V4Router actions
         bytes memory actions = abi.encodePacked(uint8(Actions.SWAP_EXACT_IN_SINGLE), uint8(Actions.SETTLE_ALL), uint8(Actions.TAKE_ALL));
