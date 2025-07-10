@@ -368,8 +368,10 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         uint256 deadline = block.timestamp + 300; // 5 minutes
         router.execute(commands, inputs, deadline);
 
-        // The output tokens will be sent directly to the creator as specified in TAKE_ALL
+        // Now, we need to transfer the tokens to the creator
+        token.transfer(creator, token.balanceOf(address(this)));
 
+        // Return the token address
         return token;
     }
 
