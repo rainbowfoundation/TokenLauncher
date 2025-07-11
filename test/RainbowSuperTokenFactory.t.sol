@@ -453,7 +453,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         assertEq(address(rainbowFactory.defaultPairToken()), address(usdc));
 
         // Verify the approval was set
-        assertEq(usdc.allowance(address(rainbowFactory), address(rainbowFactory.router())), type(uint256).max);
+        assertEq(usdc.allowance(address(rainbowFactory), address(positionManager)), type(uint256).max);
         vm.stopPrank();
     }
 
