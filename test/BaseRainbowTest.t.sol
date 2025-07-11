@@ -34,7 +34,7 @@ contract BaseRainbowTest is Test {
     
     function setUp() public virtual {
         // Fork mainnet at a recent block
-        vm.createSelectFork(vm.envString("ETH_RPC_URL"), 18900000);
+        vm.createSelectFork(vm.envString("ETH_RPC_URL"), 22897460);
         
         // Deploy only your factory
         vm.prank(owner);

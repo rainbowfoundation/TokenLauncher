@@ -3,7 +3,7 @@ src = "src"
 out = "out"
 libs = ["lib"]
 
-evm_version = "london"
+evm_version = "cancun"
 optimizer = true
 optimizer_runs = 1000
 
