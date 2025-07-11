@@ -5,6 +5,13 @@ import "./BaseRainbowTest.t.sol";
 import { MockERC20, ERC20 } from "test/mocks/MockERC20.sol";
 import { RainbowSuperToken } from "../src/RainbowSuperToken.sol";
 import { Merkle } from "lib/murky/src/Merkle.sol";
+import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
+import { Actions } from "lib/v4-periphery/src/libraries/Actions.sol";
+import { Commands } from "vendor/universal-router/Commands.sol";
+import { IV4Router } from "lib/v4-periphery/src/interfaces/IV4Router.sol";
+import { IPermit2 } from "permit2/src/interfaces/IPermit2.sol";
+import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
+import { IHooks } from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 
 contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
     bytes32 public constant MERKLE_ROOT = keccak256("test");
@@ -247,28 +254,44 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
 
         assertTrue(address(token) < address(weth), "Token address must be less than WETH");
 
-        // Get the pool address and verify token ordering
-        address poolAddress = factory.getPool(address(token), address(weth), POOL_FEE);
-        require(poolAddress != address(0), "Pool not created");
-
         // Deal some ETH and perform swap
         vm.deal(user1, 100 ether);
         vm.startPrank(user1);
         weth.deposit{ value: 50 ether }();
-        weth.approve(address(swapRouter), type(uint256).max);
 
-        // Perform swap WETH -> Token to generate fees
-        IV3SwapRouter.ExactInputSingleParams memory params = IV3SwapRouter.ExactInputSingleParams({
-            tokenIn: address(weth),
-            tokenOut: address(token),
-            fee: POOL_FEE,
-            recipient: user1,
-            amountIn: 10 ether,
-            amountOutMinimum: 0,
-            sqrtPriceLimitX96: 0
-        });
+        weth.approve(address(permit2), type(uint256).max);
+        IPermit2(permit2).approve(address(weth), address(universalRouter), uint160(1000 ether), uint48(block.timestamp + 3600));
 
-        swapRouter.exactInputSingle(params);
+        // Pool Key
+        PoolKey memory poolKey;
+        (poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks) =
+            rainbowFactory.tokenPoolKeys(address(token));
+
+        // Prepare V4 swap through Universal Router
+        bytes memory commands = abi.encodePacked(uint8(Commands.V4_SWAP));
+        bytes memory actions = abi.encodePacked(
+            uint8(Actions.SWAP_EXACT_IN_SINGLE),
+            uint8(Actions.SETTLE_ALL),
+            uint8(Actions.TAKE_ALL)
+        );
+
+        bytes[] memory params = new bytes[](3);
+        params[0] = abi.encode(
+            IV4Router.ExactInputSingleParams({
+                poolKey: poolKey,
+                zeroForOne: false, // WETH -> Token
+                amountIn: uint128(10 ether),
+                amountOutMinimum: 0,
+                hookData: bytes("")
+            })
+        );
+        params[1] = abi.encode(poolKey.currency1, uint256(10 ether)); // WETH
+        params[2] = abi.encode(poolKey.currency0, uint256(0)); // Token
+
+        bytes[] memory inputs = new bytes[](1);
+        inputs[0] = abi.encode(actions, params);
+
+        universalRouter.execute(commands, inputs, block.timestamp + 300);
         vm.stopPrank();
 
         // Mine some blocks to ensure fees are accumulated
@@ -331,28 +354,43 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         assertEq(protocolFee0, 0);
         assertEq(protocolFee1, 0);
 
-        // Get the pool address
-        address poolAddress = factory.getPool(address(token), address(weth), POOL_FEE);
-        require(poolAddress != address(0), "Pool not created");
-
         // Deal some ETH and perform swap to generate fees
         vm.deal(user1, 100 ether);
         vm.startPrank(user1);
         weth.deposit{ value: 50 ether }();
-        weth.approve(address(swapRouter), type(uint256).max);
 
         // Perform swap WETH -> Token to generate fees
-        IV3SwapRouter.ExactInputSingleParams memory params = IV3SwapRouter.ExactInputSingleParams({
-            tokenIn: address(weth),
-            tokenOut: address(token),
-            fee: POOL_FEE,
-            recipient: user1,
-            amountIn: 10 ether,
-            amountOutMinimum: 0,
-            sqrtPriceLimitX96: 0
-        });
+        weth.approve(address(permit2), type(uint256).max);
+        IPermit2(permit2).approve(address(weth), address(universalRouter), uint160(10 ether), uint48(block.timestamp + 3600));
 
-        swapRouter.exactInputSingle(params);
+        PoolKey memory poolKey;
+        (poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks) =
+            rainbowFactory.tokenPoolKeys(address(token));
+
+        bytes memory commands = abi.encodePacked(uint8(Commands.V4_SWAP));
+        bytes memory actions = abi.encodePacked(
+            uint8(Actions.SWAP_EXACT_IN_SINGLE),
+            uint8(Actions.SETTLE_ALL),
+            uint8(Actions.TAKE_ALL)
+        );
+
+        bytes[] memory params = new bytes[](3);
+        params[0] = abi.encode(
+            IV4Router.ExactInputSingleParams({
+                poolKey: poolKey,
+                zeroForOne: false, // WETH -> Token
+                amountIn: uint128(10 ether),
+                amountOutMinimum: 0,
+                hookData: bytes("")
+            })
+        );
+        params[1] = abi.encode(poolKey.currency1, uint256(10 ether)); // WETH
+        params[2] = abi.encode(poolKey.currency0, uint256(0)); // Token
+
+        bytes[] memory inputs = new bytes[](1);
+        inputs[0] = abi.encode(actions, params);
+
+        universalRouter.execute(commands, inputs, block.timestamp + 300);
         vm.stopPrank();
 
         // Mine some blocks to ensure fees are accumulated
@@ -415,7 +453,7 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         assertEq(address(rainbowFactory.defaultPairToken()), address(usdc));
 
         // Verify the approval was set
-        assertEq(usdc.allowance(address(rainbowFactory), address(rainbowFactory.swapRouter())), type(uint256).max);
+        assertEq(usdc.allowance(address(rainbowFactory), address(rainbowFactory.router())), type(uint256).max);
         vm.stopPrank();
     }
 
@@ -495,10 +533,6 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
 
         assertTrue(address(token) < address(usdc), "Token address must be less than USDC");
 
-        // Get the pool address
-        address poolAddress = factory.getPool(address(token), address(usdc), POOL_FEE);
-        require(poolAddress != address(0), "Pool not created");
-
         // Setup user1 with USDC for swapping
         vm.stopPrank();
         vm.startPrank(address(usdc));
@@ -506,20 +540,39 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         vm.stopPrank();
 
         vm.startPrank(user1);
-        usdc.approve(address(swapRouter), type(uint256).max);
+        usdc.approve(address(permit2), type(uint256).max);
+        IPermit2(permit2).approve(address(usdc), address(universalRouter), uint160(1000 ether), uint48(block.timestamp + 3600));
 
-        // Perform swap USDC -> Token to generate fees
-        IV3SwapRouter.ExactInputSingleParams memory params = IV3SwapRouter.ExactInputSingleParams({
-            tokenIn: address(usdc),
-            tokenOut: address(token),
-            fee: POOL_FEE,
-            recipient: user1,
-            amountIn: 100e18,
-            amountOutMinimum: 0,
-            sqrtPriceLimitX96: 0
-        });
+        // Get pool key from factory
+        PoolKey memory poolKey;
+        (poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks) =
+            rainbowFactory.tokenPoolKeys(address(token));
 
-        swapRouter.exactInputSingle(params);
+        // Prepare V4 swap through Universal Router
+        bytes memory commands = abi.encodePacked(uint8(Commands.V4_SWAP));
+        bytes memory actions = abi.encodePacked(
+            uint8(Actions.SWAP_EXACT_IN_SINGLE),
+            uint8(Actions.SETTLE_ALL),
+            uint8(Actions.TAKE_ALL)
+        );
+
+        bytes[] memory params = new bytes[](3);
+        params[0] = abi.encode(
+            IV4Router.ExactInputSingleParams({
+                poolKey: poolKey,
+                zeroForOne: false, // WETH -> Token
+                amountIn: uint128(10 ether),
+                amountOutMinimum: 0,
+                hookData: bytes("")
+            })
+        );
+        params[1] = abi.encode(poolKey.currency1, uint256(10 ether)); // WETH
+        params[2] = abi.encode(poolKey.currency0, uint256(0)); // Token
+
+        bytes[] memory inputs = new bytes[](1);
+        inputs[0] = abi.encode(actions, params);
+
+        universalRouter.execute(commands, inputs, block.timestamp + 300);
         vm.stopPrank();
 
         // Mine some blocks
