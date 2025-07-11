@@ -474,8 +474,7 @@ contract RainbowSuperTokenFactory is Owned, ERC721TokenReceiver {
         tokenPoolKeys[address(newToken)] = poolKey;
 
         newToken.mint(address(this), lpSupply);
-
-        newToken.approve(address(positionManager), lpSupply);
+        newToken.transfer(address(positionManager), lpSupply);
 
         // Settle tokens to credit the factory contract with the PoolManager
         bytes memory actions = abi.encodePacked(uint8(Actions.SETTLE), uint8(Actions.MINT_POSITION_FROM_DELTAS));
