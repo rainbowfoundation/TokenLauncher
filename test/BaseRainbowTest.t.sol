@@ -16,10 +16,10 @@ contract BaseRainbowTest is Test {
     IUniversalRouter public universalRouter = IUniversalRouter(0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af);
     address public permit2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
     IWETH9 public weth = IWETH9(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
-    
+
     // Our factory contract
     RainbowSuperTokenFactory public rainbowFactory;
-    
+
     // Test accounts
     address public owner = makeAddr("owner");
     address public creator1 = makeAddr("creator1");
@@ -31,23 +31,17 @@ contract BaseRainbowTest is Test {
     // Constants for testing
     uint256 constant INITIAL_SUPPLY = 10 ether;
     uint24 constant POOL_FEE = 10_000; // 1%
-    
+
     function setUp() public virtual {
         // Fork mainnet at a recent block
-        vm.createSelectFork(vm.envString("ETH_RPC_URL"), 22897460);
-        
+        vm.createSelectFork(vm.envString("ETH_RPC_URL"), 22_897_460);
+
         // Deploy only your factory
         vm.prank(owner);
         rainbowFactory = new RainbowSuperTokenFactory(
-            address(poolManager),
-            address(positionManager),
-            address(universalRouter),
-            address(permit2),
-            address(pot),
-            address(weth),
-            "https://rainbow.me/tokens"
+            address(poolManager), address(positionManager), address(universalRouter), address(permit2), address(pot), address(weth), "https://rainbow.me/tokens"
         );
-        
+
         // Fund test accounts
         vm.deal(creator1, 100 ether);
         vm.deal(user1, 100 ether);

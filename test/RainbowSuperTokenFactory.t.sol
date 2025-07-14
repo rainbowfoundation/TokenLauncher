@@ -12,6 +12,7 @@ import { IV4Router } from "lib/v4-periphery/src/interfaces/IV4Router.sol";
 import { IPermit2 } from "permit2/src/interfaces/IPermit2.sol";
 import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
 import { IHooks } from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import { PoolId } from "@uniswap/v4-core/src/types/PoolId.sol";
 
 contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
     bytes32 public constant MERKLE_ROOT = keccak256("test");
@@ -264,16 +265,11 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
 
         // Pool Key
         PoolKey memory poolKey;
-        (poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks) =
-            rainbowFactory.tokenPoolKeys(address(token));
+        (poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks) = rainbowFactory.tokenPoolKeys(address(token));
 
         // Prepare V4 swap through Universal Router
         bytes memory commands = abi.encodePacked(uint8(Commands.V4_SWAP));
-        bytes memory actions = abi.encodePacked(
-            uint8(Actions.SWAP_EXACT_IN_SINGLE),
-            uint8(Actions.SETTLE_ALL),
-            uint8(Actions.TAKE_ALL)
-        );
+        bytes memory actions = abi.encodePacked(uint8(Actions.SWAP_EXACT_IN_SINGLE), uint8(Actions.SETTLE_ALL), uint8(Actions.TAKE_ALL));
 
         bytes[] memory params = new bytes[](3);
         params[0] = abi.encode(
@@ -364,15 +360,10 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         IPermit2(permit2).approve(address(weth), address(universalRouter), uint160(10 ether), uint48(block.timestamp + 3600));
 
         PoolKey memory poolKey;
-        (poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks) =
-            rainbowFactory.tokenPoolKeys(address(token));
+        (poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks) = rainbowFactory.tokenPoolKeys(address(token));
 
         bytes memory commands = abi.encodePacked(uint8(Commands.V4_SWAP));
-        bytes memory actions = abi.encodePacked(
-            uint8(Actions.SWAP_EXACT_IN_SINGLE),
-            uint8(Actions.SETTLE_ALL),
-            uint8(Actions.TAKE_ALL)
-        );
+        bytes memory actions = abi.encodePacked(uint8(Actions.SWAP_EXACT_IN_SINGLE), uint8(Actions.SETTLE_ALL), uint8(Actions.TAKE_ALL));
 
         bytes[] memory params = new bytes[](3);
         params[0] = abi.encode(
@@ -545,16 +536,11 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
 
         // Get pool key from factory
         PoolKey memory poolKey;
-        (poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks) =
-            rainbowFactory.tokenPoolKeys(address(token));
+        (poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks) = rainbowFactory.tokenPoolKeys(address(token));
 
         // Prepare V4 swap through Universal Router
         bytes memory commands = abi.encodePacked(uint8(Commands.V4_SWAP));
-        bytes memory actions = abi.encodePacked(
-            uint8(Actions.SWAP_EXACT_IN_SINGLE),
-            uint8(Actions.SETTLE_ALL),
-            uint8(Actions.TAKE_ALL)
-        );
+        bytes memory actions = abi.encodePacked(uint8(Actions.SWAP_EXACT_IN_SINGLE), uint8(Actions.SETTLE_ALL), uint8(Actions.TAKE_ALL));
 
         bytes[] memory params = new bytes[](3);
         params[0] = abi.encode(
@@ -744,5 +730,76 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
 
         // Verify total supply remains constant
         assertEq(token.totalSupply(), INITIAL_SUPPLY, "Total supply should not change");
+    }
+
+    function testPoolManagerBalanceWithoutAirdrop() public {
+        vm.startPrank(creator1);
+
+        // Launch token WITHOUT airdrop (merkleroot = bytes32(0))
+        (bytes32 salt,) = findValidSalt(creator1, "Balance Test", "BALT", bytes32(0), INITIAL_SUPPLY);
+        RainbowSuperToken token = rainbowFactory.launchRainbowSuperToken(
+            "Balance Test",
+            "BALT",
+            bytes32(0), // No merkleroot = no airdrop
+            INITIAL_SUPPLY,
+            200,
+            salt,
+            address(creator1)
+        );
+
+        // Key insight: When merkleroot is bytes32(0), hasAirdrop = false
+        // This means NO airdrop allocation happens, regardless of airdropBps in config
+        // Therefore, ALL tokens go to LP and end up in PoolManager
+
+        uint256 poolManagerBalance = token.balanceOf(address(poolManager));
+
+        // The original test incorrectly expected LP supply to be reduced by airdropBps
+        // But when hasAirdrop = false, airdropAmount = 0, so lpSupply = totalSupply
+        assertEq(poolManagerBalance, INITIAL_SUPPLY, "PoolManager holds full supply when no airdrop");
+
+        // Verify no tokens were minted to the token contract for airdrop
+        uint256 tokenContractBalance = token.balanceOf(address(token));
+        assertEq(tokenContractBalance, 0, "No airdrop tokens when merkleroot is zero");
+
+        // Verify the position was created
+        uint256 positionTokenId = rainbowFactory.tokenPositionIds(address(token));
+        assertTrue(positionTokenId > 0, "Position should have been created");
+
+        vm.stopPrank();
+    }
+
+    function testPoolManagerBalanceWithAirdrop() public {
+        vm.startPrank(creator1);
+
+        // Launch token WITH airdrop (non-zero merkleroot)
+        bytes32 merkleroot = bytes32(uint256(1)); // Non-zero merkleroot
+        (bytes32 salt,) = findValidSalt(creator1, "Airdrop Test", "AIRT", merkleroot, INITIAL_SUPPLY);
+        RainbowSuperToken token = rainbowFactory.launchRainbowSuperToken(
+            "Airdrop Test",
+            "AIRT",
+            merkleroot, // Non-zero merkleroot = has airdrop
+            INITIAL_SUPPLY,
+            200,
+            salt,
+            address(creator1)
+        );
+
+        // With airdrop enabled, tokens are split between LP and airdrop
+        (, uint16 airdropBps,,,) = rainbowFactory.defaultFeeConfig();
+        uint256 airdropAmount = (INITIAL_SUPPLY * airdropBps) / 10_000;
+        uint256 lpSupply = INITIAL_SUPPLY - airdropAmount;
+
+        // PoolManager should only have the LP supply
+        uint256 poolManagerBalance = token.balanceOf(address(poolManager));
+        assertEq(poolManagerBalance, lpSupply, "PoolManager holds LP supply when airdrop enabled");
+
+        // Token contract should hold the airdrop amount
+        uint256 tokenContractBalance = token.balanceOf(address(token));
+        assertEq(tokenContractBalance, airdropAmount, "Token contract holds airdrop amount");
+
+        // Total should equal initial supply
+        assertEq(poolManagerBalance + tokenContractBalance, INITIAL_SUPPLY, "Total supply accounted for");
+
+        vm.stopPrank();
     }
 }
