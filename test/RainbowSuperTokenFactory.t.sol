@@ -431,6 +431,100 @@ contract RainbowSuperTokenFactoryTest is BaseRainbowTest {
         return (airdropBps);
     }
 
+    function testSlippageLoss() public {
+        uint256 amountIn = 100 ether;
+        
+        console2.log("Buy size: %s ETH", amountIn / 1e18);
+        console2.log("Supply: %s tokens", INITIAL_SUPPLY / 1e18);
+        
+        (bytes32 salt,) = findValidSalt(address(this), "Test", "T", bytes32(0), INITIAL_SUPPLY);
+        vm.deal(address(this), amountIn);
+        
+        // x*y=k AMM math: large trades relative to pool depth = bad rates
+        console2.log("\nExecuting %s ETH buy with minOut=0", amountIn / 1e18);
+        
+        RainbowSuperToken token = rainbowFactory.launchRainbowSuperTokenAndBuy{ value: amountIn }(
+            "Test", "T", bytes32(0), INITIAL_SUPPLY, 0, salt, address(this), amountIn, 0
+        );
+        
+        uint256 received = ERC20(token).balanceOf(address(this));
+        
+        console2.log("\nGot %s%% of supply", (received * 100) / INITIAL_SUPPLY);
+        
+        uint256 effectivePriceInWei = (amountIn * 1e18) / received;
+        console2.log("Paid %s ETH per token", effectivePriceInWei / 1e18);
+        
+        // Sanity check: getting 90% of supply from one trade = broken
+        uint256 reasonableMaxTokens = INITIAL_SUPPLY / 2;
+        if (received > reasonableMaxTokens) {
+            console2.log("RED FLAG: Got %sx more than reasonable", received / reasonableMaxTokens);
+        }
+        
+        assertGt(received, 0);
+        
+        // Got 90% of supply = paid 11 ETH/token
+        assertGt(received, INITIAL_SUPPLY * 80 / 100, "Got >80% of supply");
+        
+        uint256 pricePerTokenWei = (amountIn * 1e18) / received;
+        assertGt(pricePerTokenWei, 10 ether, "Overpaid by >10x");
+        
+        // minOut=0 accepts ANY output, even 1 wei
+        uint256 reasonableMinimumTokens = INITIAL_SUPPLY * 10 / 100;
+        
+        console2.log("\nWith slippage check would require min %s tokens", reasonableMinimumTokens / 1e18);
+        console2.log("Actually got %s tokens", received / 1e18);
+        
+        console2.log("\namountOutMinimum=0 accepts any price impact");
+        
+        console2.log("\nWorst case: 0.1 ETH initial liq + 100 ETH buy = 99.9%% of supply at 1000x markup");
+    }
+
+    function testSlippageProtectionWorks() public {
+        uint256 amountIn = 1 ether; // Small buy first
+        
+        console2.log("Test 1: Small buy with reasonable slippage protection");
+        
+        (bytes32 salt,) = findValidSalt(address(this), "Test", "T", bytes32(0), INITIAL_SUPPLY);
+        vm.deal(address(this), amountIn);
+        
+        // For 1 ETH, expect at least 0.5% of supply (reasonable)
+        uint256 minAmountOut = INITIAL_SUPPLY * 5 / 1000; // 0.05 tokens
+        
+        console2.log("Buying with %s ETH, expecting min %s tokens", amountIn / 1e18, minAmountOut / 1e18);
+        
+        RainbowSuperToken token = rainbowFactory.launchRainbowSuperTokenAndBuy{ value: amountIn }(
+            "Test", "T", bytes32(0), INITIAL_SUPPLY, 0, salt, address(this), amountIn, minAmountOut
+        );
+        
+        uint256 received = token.balanceOf(address(this));
+        console2.log("Received %s tokens - slippage protection passed", received / 1e18);
+        assertGt(received, minAmountOut, "Got more than minimum");
+    }
+    
+    function testExcessiveSlippageProtectionReverts() public {
+        uint256 amountIn = 100 ether;
+        
+        console2.log("\nTest 2: Large buy with unrealistic expectation");
+        
+        (bytes32 salt,) = findValidSalt(address(this), "Test2", "T2", bytes32(0), INITIAL_SUPPLY);
+        vm.deal(address(this), amountIn);
+        
+        // Unrealistic: expect 95% of supply for 100 ETH 
+        uint256 minAmountOut = INITIAL_SUPPLY * 95 / 100;
+        
+        console2.log("Buying with %s ETH, expecting min %s tokens (95%% of supply)", 
+            amountIn / 1e18, 
+            minAmountOut / 1e18
+        );
+        
+        // This SHOULD revert because we can't get 95% of supply
+        vm.expectRevert(); // "V4_TOO_LITTLE_RECEIVED"
+        
+        rainbowFactory.launchRainbowSuperTokenAndBuy{ value: amountIn }(
+            "Test2", "T2", bytes32(0), INITIAL_SUPPLY, 0, salt, address(this), amountIn, minAmountOut
+        );
+    }
+
     // Add these tests to RainbowSuperTokenFactoryTest.sol
     function testUpdateDefaultPairToken() public {
         // Deploy mock USDC
